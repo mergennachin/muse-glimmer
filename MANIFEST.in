@@ -1,0 +1,10 @@
+include .gitmodules
+include default_config.toml
+recursive-include tokenizer *.json *.jinja README.md
+recursive-include build_backend *.py
+recursive-include packaging *.py
+recursive-include packaging/native CMakeLists.txt
+prune third-party/executorch
+global-exclude .git __pycache__ *.pyc
+prune python/src/muse_glimmer/_native
+prune python/src/muse_glimmer/_vendor

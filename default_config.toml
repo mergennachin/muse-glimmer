@@ -1,0 +1,28 @@
+# Shared serving defaults, matching the upstream Muse Glimmer serving example.
+# Precedence: CLI flags > explicit --config file > this file.
+# Config files are read in place. Relative paths use the current directory.
+# Example: muse-glimmer serve --model /path/model.pte --config ./config.toml
+
+# Local .pte file or directory containing exactly one .pte (not recursive).
+# Alternatively, pass --model. If neither is set, serve uses
+# the model from the last successful muse-glimmer pull (without downloading).
+# model = "/absolute/path/to/model.pte"
+
+# Listening address and port. 127.0.0.1 accepts local connections only.
+host = "127.0.0.1"
+port = 8000
+
+# Token limit per conversation. Must fit the exported model's context limit.
+context = 131072
+
+# Concurrent sessions/requests. Higher values use more memory.
+concurrency = 4
+
+# Reusable prompt-prefix snapshots; 0 disables caching.
+prefix_cache_entries = 32
+
+# Enable for DFlash exports. Override with --dflash or --no-dflash.
+dflash = false
+
+# Draft proposals per step, used only with DFlash. 0 uses the exported maximum.
+dflash_n_draft = 3
