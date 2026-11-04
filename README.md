@@ -17,10 +17,7 @@ muse-glimmer pull SocialLocalMobile/Muse-Glimmer-30B-ExecuTorch-PTE
 muse-glimmer serve
 ```
 
-For repositories with several exports, `pull` lists variants and download sizes.
-Choose one with `muse-glimmer pull HF/repo_id --variant <directory-name>`.
-Downloads use the Hugging Face cache; the last successful pull becomes the default.
-Use `muse-glimmer serve --model <path>` for a local `.pte` file or directory containing one.
+Use `pull --variant <name>` to choose an export, or `serve --model <path>` for a local model.
 
 The tokenizer is included. The server listens at `http://127.0.0.1:8000`;
 press **Ctrl+C** to stop it. Use `--port` to choose another port.
