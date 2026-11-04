@@ -19,8 +19,7 @@ muse-glimmer serve
 
 Use `pull --variant <name>` to choose an export, or `serve --model <path>` for a local model.
 
-The tokenizer is included. The server listens at `http://127.0.0.1:8000`;
-press **Ctrl+C** to stop it. Use `--port` to choose another port.
+The server runs at `http://127.0.0.1:8000`. Press **Ctrl+C** to stop.
 
 ## Smoke test
 
