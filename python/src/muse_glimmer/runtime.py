@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from socket import socket
 
 from .config import Settings
 from .resources import resource_path
+
+MODEL_ID = "muse-glimmer-30B"
 
 
 def native_dir() -> Path:
@@ -43,7 +46,7 @@ def server_options(model: Path, settings: Settings) -> list[str]:
         "--backend",
         "mlx",
         "--model-id",
-        "muse-glimmer-30B",
+        MODEL_ID,
         "--max-context",
         str(settings.context),
         "--max-sessions",
@@ -69,7 +72,7 @@ def server_options(model: Path, settings: Settings) -> list[str]:
     return options
 
 
-def serve(model: Path, settings: Settings) -> None:
+def serve(model: Path, settings: Settings, listener: socket | None = None) -> None:
     if not (native_dir() / "muse_glimmer_batching_worker").is_file():
         raise ValueError("Native runtime missing. Reinstall muse-glimmer to build it.")
     import uvicorn
@@ -79,4 +82,5 @@ def serve(model: Path, settings: Settings) -> None:
     args = serving._parse_args(server_options(model, settings))
     app = serving.build_app_from_args(args)
 
-    uvicorn.run(app, host=settings.host, port=settings.port, log_level="info")
+    config = uvicorn.Config(app, host=settings.host, port=settings.port, log_level="info")
+    uvicorn.Server(config).run(sockets=[listener] if listener is not None else None)

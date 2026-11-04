@@ -20,6 +20,7 @@ def parser() -> argparse.ArgumentParser:
     command = commands.add_parser("serve", help="Start the local server")
     command.add_argument("--config", type=Path)
     command.add_argument("--model", help="Local .pte file or directory containing one .pte")
+    command.add_argument("--launch", choices=["muse"], help="Launch Muse using the local server")
     command.add_argument("--host")
     command.add_argument("--port", type=int)
     command.add_argument("--context", type=int)
@@ -59,6 +60,10 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
             flush=True,
         )
+        if args.launch == "muse":
+            from .launch import launch_muse
+
+            return launch_muse(model, settings)
         serve(model, settings)
         return 0
     except KeyboardInterrupt:

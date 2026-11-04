@@ -21,6 +21,17 @@ Use `pull --variant <name>` to choose a specific folder, or `serve --model <path
 
 The server runs at `http://127.0.0.1:8000`. Press **Ctrl+C** to stop.
 
+## Use Muse
+
+With Muse installed, run this from your project directory:
+
+```sh
+muse-glimmer serve --launch muse
+```
+
+Muse uses the local model through its OpenRouter provider. No API key is needed.
+Exiting Muse also stops the server.
+
 ## Smoke test
 
 With the server running, open another terminal:
