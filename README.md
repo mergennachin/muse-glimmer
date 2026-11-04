@@ -17,7 +17,7 @@ muse-glimmer pull SocialLocalMobile/Muse-Glimmer-30B-ExecuTorch-PTE
 muse-glimmer serve
 ```
 
-Use `pull --variant <name>` to choose an export, or `serve --model <path>` for a local model.
+Use `pull --variant <name>` to choose a specific folder, or `serve --model <path>` for a local model.
 
 The server runs at `http://127.0.0.1:8000`. Press **Ctrl+C** to stop.
 
