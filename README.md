@@ -21,7 +21,7 @@ Use `pull --variant <name>` to choose a specific folder, or `serve --model <path
 
 The server runs at `http://127.0.0.1:8000`. Press **Ctrl+C** to stop.
 
-## Use Muse
+## Use Muse (coding agent)
 
 With Muse installed, run this from your project directory:
 
