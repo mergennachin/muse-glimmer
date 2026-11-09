@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -54,7 +55,7 @@ def source_metadata() -> dict[str, str]:
     return metadata
 
 
-def validate_checkout(source: Path, revision: str) -> None:
+def validate_checkout(source: Path, revision: str, *, editable: bool = False) -> None:
     if not (source / "CMakePresets.json").is_file():
         raise RuntimeError(f"ExecuTorch source not found at {source}")
     if not (source / ".git").exists():
@@ -66,7 +67,7 @@ def validate_checkout(source: Path, revision: str) -> None:
         raise RuntimeError(
             f"ExecuTorch at {source} differs from the submodule pin {revision}; checkout preserved"
         )
-    if git(source, "status", "--porcelain", "--untracked-files=all").strip():
+    if not editable and git(source, "status", "--porcelain", "--untracked-files=all").strip():
         raise RuntimeError(f"ExecuTorch at {source} must be clean; local changes were preserved")
     if any(
         line.startswith(("+", "U"))
@@ -106,7 +107,7 @@ def initialize_submodules(source: Path) -> None:
         )
 
 
-def source_checkout() -> Path:
+def source_checkout(*, editable: bool = False) -> Path:
     revision = source_metadata()["revision"]
     source = ROOT / SUBMODULE
     if (ROOT / ".git").exists() and not (source / ".git").exists():
@@ -116,14 +117,58 @@ def source_checkout() -> Path:
             )
         print(f"Initializing {SUBMODULE}", flush=True)
         git(ROOT, "submodule", "update", "--init", "--depth", "1", "--", SUBMODULE)
-    validate_checkout(source, revision)
+    validate_checkout(source, revision, editable=editable)
     if (source / ".git").exists():
         initialize_submodules(source)
-        validate_checkout(source, revision)
+        validate_checkout(source, revision, editable=editable)
     return source
 
 
-def copy_sources(source: Path, destination: Path) -> None:
+def repositories(source: Path) -> list[Path]:
+    return [source] + [
+        source / line.split()[1]
+        for line in git(source, "submodule", "status", "--recursive").splitlines()
+        if not line.startswith("-")
+    ]
+
+
+def untracked_sources(source: Path) -> list[Path]:
+    return [
+        repository / name
+        for repository in repositories(source)
+        for name in git(repository, "ls-files", "--others", "--exclude-standard", "-z").split("\0")
+        if name
+    ]
+
+
+def local_source_hash(source: Path) -> str:
+    """Identify working-tree contents, including new files and nested dependencies."""
+    if not (source / ".git").exists():
+        return ""
+    changed = set(untracked_sources(source))
+    for repository in repositories(source):
+        changed.update(
+            repository / name
+            for name in git(
+                repository, "diff", "HEAD", "--name-only", "--ignore-submodules=all", "-z"
+            ).split("\0")
+            if name
+        )
+    digest = hashlib.sha256()
+    for path in sorted(changed):
+        digest.update(str(path.relative_to(source)).encode() + b"\0")
+        if path.is_symlink():
+            digest.update(b"link\0" + os.fsencode(os.readlink(path)))
+        elif path.is_file():
+            digest.update(str(path.stat().st_mode).encode() + b"\0")
+            with path.open("rb") as handle:
+                digest.update(hashlib.file_digest(handle, "sha256").digest())
+        else:
+            digest.update(b"deleted")
+    return digest.hexdigest() if changed else ""
+
+
+def copy_sources(source: Path, destination: Path, *, editable: bool = False) -> None:
     """Copy tracked sources and initialized dependencies, excluding Git metadata."""
     if (source / ".git").exists():
         paths = [
@@ -131,6 +176,8 @@ def copy_sources(source: Path, destination: Path) -> None:
             for name in git(source, "ls-files", "--recurse-submodules", "-z").split("\0")
             if name
         ]
+        if editable:
+            paths = sorted(set(paths) | set(untracked_sources(source)))
     else:
         paths = list(source.rglob("*"))
     for path in paths:

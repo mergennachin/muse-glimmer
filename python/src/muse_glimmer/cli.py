@@ -38,8 +38,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "pull":
             from .download import pull
 
-            model = pull(args.release, args.variant)
-            print(f"Default model: {model}\nRun muse-glimmer serve to start serving.")
+            pull(args.release, args.variant)
+            print(f"Default model: Muse Glimmer {args.release}\nRun muse-glimmer serve to start serving.")
             return 0
 
         values = {key: value for key, value in vars(args).items() if key in Settings.model_fields}

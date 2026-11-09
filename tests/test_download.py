@@ -1,10 +1,10 @@
 """CLI download behavior with mocked Hub calls; no model weights are transferred."""
 
+import importlib
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, call
 
-import httpx
 import pytest
 from muse_glimmer import download, runtime
 from muse_glimmer.cli import main
@@ -72,7 +72,10 @@ def test_pull_then_serve_uses_downloaded_model(hub, monkeypatch, capsys, variant
     if variant is not None:
         args.extend(["--variant", variant])
     assert main(args) == 0
-    assert "Run muse-glimmer serve" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "Default model: Muse Glimmer 1.0" in output
+    assert "Run muse-glimmer serve" in output
+    assert "SocialLocalMobile" not in output
     model = hub.snapshot / "text-solo-metal/text-solo-metal.pte"
     assert hub.state.read_text().strip() == str(model)
     hub.api.model_info.assert_called_once_with(
@@ -240,11 +243,14 @@ def test_invalid_selection_does_not_download_or_change_default(
 
 
 @pytest.mark.parametrize("failure_at", ["metadata", "model", "positions"])
-def test_download_failure_preserves_previous_default(hub, failure_at, capsys):
+@pytest.mark.parametrize("transport", ["httpx", "httpx2"])
+def test_download_failure_preserves_previous_default(hub, failure_at, capsys, transport):
+    if importlib.util.find_spec(transport) is None:
+        pytest.skip(f"{transport} is not installed with this Hub version")
     files(hub, "text-solo-metal/model.pte", "text-solo-metal/pos_embed.bin")
     hub.state.parent.mkdir()
     hub.state.write_text("/previous/model.pte\n")
-    error = httpx.ConnectError("connection lost")
+    error = importlib.import_module(transport).ConnectError("connection lost")
     if failure_at == "metadata":
         hub.api.model_info.side_effect = error
     elif failure_at == "model":
@@ -329,7 +335,7 @@ def test_download_size_includes_only_selected_export_and_companions(hub, catalog
         }.items()
     ]
     assert main(["pull", "2.0", "--variant", "text-image"]) == 0
-    assert "owner/repo/vision/model.pte (19.1 GB)" in capsys.readouterr().out
+    assert "Downloading Muse Glimmer 2.0 (19.1 GB)" in capsys.readouterr().out
     assert hub.fetch.call_count == 2
 
 
@@ -348,7 +354,7 @@ def test_missing_file_sizes_are_not_reported_as_zero(hub, catalog, capsys):
         SimpleNamespace(rfilename="vision/model.pte", size=100),
     ]
     assert main(["pull", "2.0"]) == 0
-    assert "owner/repo/model.pte (size unknown)" in capsys.readouterr().out
+    assert "Downloading Muse Glimmer 2.0 (size unknown)" in capsys.readouterr().out
     hub.fetch.assert_called_once_with("owner/repo", "model.pte", revision=hub.info.sha)
 
 

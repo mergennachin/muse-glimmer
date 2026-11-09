@@ -7,6 +7,7 @@ import json
 import runpy
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,11 +18,28 @@ REWRITES = {
 }
 
 
-def stage(source: Path, worker_dir: Path) -> None:
+def stage(source: Path, worker_dir: Path, *, editable: bool = False) -> None:
+    # Validate the entire replacement before touching an existing editable install.
+    with tempfile.TemporaryDirectory(prefix=".stage-", dir=PACKAGE) as temporary:
+        staged = Path(temporary)
+        revision = _stage(source, worker_dir, staged, editable=editable)
+        for name in ("_vendor", "_native"):
+            destination = PACKAGE / name
+            if destination.exists():
+                shutil.rmtree(destination)
+            (staged / name).rename(destination)
+    print(f"Packaged Mac runtime from ExecuTorch {revision}")
+
+
+def _stage(source: Path, worker_dir: Path, package: Path, *, editable: bool) -> str:
     acquisition = runpy.run_path(str(ROOT / "packaging/source.py"))
     metadata = acquisition["source_metadata"]()
     revision = metadata["revision"]
-    acquisition["validate_checkout"](source, revision)
+    acquisition["validate_checkout"](source, revision, editable=editable)
+    if editable:
+        local_changes = acquisition["local_source_hash"](source)
+        if local_changes:
+            metadata["local_changes"] = local_changes
     worker = worker_dir / "muse_glimmer_batching_worker"
     metallib = worker_dir / "mlx.metallib"
     for path in [worker, metallib]:
@@ -37,9 +55,7 @@ def stage(source: Path, worker_dir: Path) -> None:
             raise ValueError(
                 f"Worker depends on an unbundled library: {dependency}. Build a self-contained worker first."
             )
-    vendor = PACKAGE / "_vendor"
-    if vendor.exists():
-        shutil.rmtree(vendor)
+    vendor = package / "_vendor"
     vendor.mkdir(parents=True)
     (vendor / "__init__.py").write_text(
         '"""Generated from the pinned ExecuTorch source; do not edit here."""\n'
@@ -74,9 +90,7 @@ def stage(source: Path, worker_dir: Path) -> None:
             output.write_text(text)
     shutil.copy2(source / "LICENSE", vendor / "LICENSE")
     (vendor / "provenance.json").write_text(json.dumps(metadata, indent=2) + "\n")
-    native = PACKAGE / "_native"
-    if native.exists():
-        shutil.rmtree(native)
+    native = package / "_native"
     native.mkdir()
     for path in [worker, metallib]:
         shutil.copy2(path, native / path.name)
@@ -106,4 +120,4 @@ def stage(source: Path, worker_dir: Path) -> None:
         for path in paths:
             notices.append(f"--- {relative}/{path.name} ---\n\n{path.read_text()}\n")
     (native / "THIRD_PARTY_NOTICES").write_text("\n".join(notices))
-    print(f"Packaged Mac runtime from ExecuTorch {revision}")
+    return revision

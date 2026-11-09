@@ -1,11 +1,13 @@
 """Build and install real wheels in isolation; native compilation is not exercised."""
 
 import os
+import runpy
 import shutil
 import subprocess
 import sys
 import sysconfig
 import venv
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -42,6 +44,11 @@ def test_installed_package_uses_its_own_shared_resources(tmp_path, mode):
 
     command = "bdist_wheel" if mode == "wheel" else "editable_wheel"
     arguments = [sys.executable, "setup.py", command, "--dist-dir", str(tmp_path / "dist")]
+    if mode == "wheel":
+        removed = project / "python/src/muse_glimmer/removed_module.py"
+        removed.write_text("OLD = True\n")
+        run(arguments, cwd=project)
+        removed.unlink()
     run(arguments, cwd=project)
 
     # An existing editable installation must not satisfy imports for the test wheel.
@@ -49,6 +56,8 @@ def test_installed_package_uses_its_own_shared_resources(tmp_path, mode):
     venv.EnvBuilder(with_pip=True).create(installed)
     python = installed / "bin/python"
     wheel = next((tmp_path / "dist").glob("*.whl"))
+    with zipfile.ZipFile(wheel) as archive:
+        assert not any(name.endswith("/removed_module.py") for name in archive.namelist())
     run([str(python), "-I", "-m", "pip", "install", "--no-index", "--no-deps", str(wheel)])
     if mode == "wheel":
         shutil.rmtree(project)
@@ -83,3 +92,50 @@ for original in (Path(sys.argv[3]) / 'tokenizer').iterdir():
             sysconfig.get_path("platlib"),
         ]
     )
+
+
+@pytest.mark.parametrize("failure", ["import", "license"])
+def test_failed_staging_preserves_installed_runtime(tmp_path, monkeypatch, failure):
+    root = Path(__file__).resolve().parents[1]
+    stage = runpy.run_path(str(root / "packaging/stage.py"))["stage"]
+    package = tmp_path / "package"
+    for name in ("_vendor", "_native"):
+        (package / name).mkdir(parents=True)
+        (package / name / "previous").write_bytes(b"working install")
+    monkeypatch.setitem(stage.__globals__, "PACKAGE", package)
+    source = tmp_path / "source"
+    sources = source / "examples/llm_server/python"
+    sources.mkdir(parents=True)
+    (sources / "server.py").write_text(
+        "import executorch.unbundled_dependency\n" if failure == "import" else "READY = True\n"
+    )
+    (source / "LICENSE").write_text("fixture license\n")
+    worker = tmp_path / "build/examples/models/worker"
+    worker.mkdir(parents=True)
+    for name in ("muse_glimmer_batching_worker", "mlx.metallib"):
+        (worker / name).write_bytes(b"new artifact")
+    monkeypatch.setattr(
+        runpy,
+        "run_path",
+        lambda _: {
+            "source_metadata": lambda: {"revision": "a" * 40},
+            "validate_checkout": lambda *args, **kwargs: None,
+            "MLX_SUBMODULES": [],
+        },
+    )
+    monkeypatch.setattr(
+        subprocess,
+        "check_output",
+        lambda args, **kwargs: "arm64\n" if args[0] == "lipo" else "worker:\n",
+    )
+    message = (
+        "Unpackaged upstream dependency"
+        if failure == "import"
+        else "Missing native dependency license"
+    )
+    with pytest.raises(ValueError, match=message):
+        stage(source, worker)
+    for name in ("_vendor", "_native"):
+        assert (package / name / "previous").read_bytes() == b"working install"
+        assert len(list((package / name).iterdir())) == 1
+    assert sorted(path.name for path in package.iterdir()) == ["_native", "_vendor"]

@@ -72,14 +72,20 @@ def server_options(model: Path, settings: Settings) -> list[str]:
     return options
 
 
-def serve(model: Path, settings: Settings, listener: socket | None = None) -> None:
+def serve(
+    model: Path,
+    settings: Settings,
+    listener: socket | None = None,
+    *,
+    api_dialect: str = "openai",
+) -> None:
     if not (native_dir() / "muse_glimmer_batching_worker").is_file():
         raise ValueError("Native runtime missing. Reinstall muse-glimmer to build it.")
     import uvicorn
 
     from ._vendor.muse import serve_batching as serving
 
-    args = serving._parse_args(server_options(model, settings))
+    args = serving._parse_args([*server_options(model, settings), "--api-dialect", api_dialect])
     app = serving.build_app_from_args(args)
 
     config = uvicorn.Config(app, host=settings.host, port=settings.port, log_level="info")

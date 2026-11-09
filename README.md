@@ -17,22 +17,11 @@ muse-glimmer pull 1.0
 muse-glimmer serve
 ```
 
-`pull` selects the preferred export for your platform using [models.yaml](models.yaml),
-which defines each release's default variant and maps variants and platforms to
-Hugging Face repositories, pinned revisions, and export folders.
-
-Select a variant explicitly with:
-
-```sh
-muse-glimmer pull 1.0 --variant text-solo
-```
-
-The backend is selected automatically. Unknown releases, unknown variants, and unsupported
-platforms are reported before downloading.
-
-Use `serve --model <path>` for a local model.
+`pull` selects the model for your platform. Use `pull 1.0 --variant text-solo`
+to select a variant, or `serve --model <path>` for a local model.
 
 The server runs at `http://127.0.0.1:8000`. Press **Ctrl+C** to stop.
+The terminal shows a live HUD.
 
 ## Run Muse (coding agent) with the local model
 
@@ -54,6 +43,7 @@ curl --fail-with-body http://127.0.0.1:8000/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "muse-glimmer-30B",
+    "session_id": "demo",
     "messages": [
       {"role": "system", "content": "Reasoning strength: low"},
       {"role": "user", "content": "Say hello."}
@@ -64,6 +54,7 @@ curl --fail-with-body http://127.0.0.1:8000/v1/chat/completions \
 ```
 
 A successful response contains an assistant message in `choices[0].message.content`.
+Requests appear under `demo` in the HUD; change `session_id` for another session.
 
 ## Configuration
 

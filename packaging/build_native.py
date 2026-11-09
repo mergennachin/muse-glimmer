@@ -20,7 +20,7 @@ def run(argv: list[str], cwd: Path) -> None:
     subprocess.run(argv, cwd=cwd, check=True)
 
 
-def main() -> None:
+def main(*, editable: bool = False) -> None:
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         raise RuntimeError("Source installation currently supports Apple silicon macOS.")
     for tool in ("git", "cmake", "xcrun", "make"):
@@ -30,11 +30,13 @@ def main() -> None:
             )
     run(["xcrun", "--find", "metal"], ROOT)
     acquisition = runpy.run_path(str(ROOT / "packaging/source.py"))
-    source = acquisition["source_checkout"]()
+    source = acquisition["source_checkout"](editable=editable)
     revision = acquisition["source_metadata"]()["revision"]
+    local_changes = acquisition["local_source_hash"](source) if editable else ""
+    source_id = f"{revision}-{local_changes}" if local_changes else revision
     minimum = platform.mac_ver()[0].split(".")[0] + ".0"
     key = hashlib.sha256(
-        f"clean-worker:{source}:{revision}:{minimum}:{sys.version_info[:2]}".encode()
+        f"clean-worker:{source}:{source_id}:{minimum}:{sys.version_info[:2]}".encode()
     ).hexdigest()[:16]
     build = Path.home() / "Library/Caches/muse-glimmer/build" / key
     build.mkdir(parents=True, exist_ok=True)
@@ -48,12 +50,12 @@ def main() -> None:
         fcntl.flock(lock, fcntl.LOCK_EX)
         # Upstream's normal build adjusts MLX sources. Use a disposable snapshot
         # so the registered submodule stays clean before and after compilation.
-        snapshot = build / "sources" / revision / "executorch"
+        snapshot = build / "sources" / source_id / "executorch"
         if not snapshot.is_dir():
             snapshot.parent.mkdir(parents=True, exist_ok=True)
             with tempfile.TemporaryDirectory(dir=snapshot.parent) as temporary:
                 staged = Path(temporary) / "executorch"
-                acquisition["copy_sources"](source, staged)
+                acquisition["copy_sources"](source, staged, editable=editable)
                 staged.rename(snapshot)
         run(
             [
@@ -106,7 +108,7 @@ def main() -> None:
         else:
             raise RuntimeError("The ExecuTorch build did not provide MLX_METALLIB_PATH")
         staging = runpy.run_path(str(ROOT / "packaging/stage.py"))
-        staging["stage"](source, worker)
+        staging["stage"](source, worker, editable=editable)
 
 
 if __name__ == "__main__":

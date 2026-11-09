@@ -140,4 +140,9 @@ def launch_muse(model: Path, settings: Settings) -> int:
 
 if __name__ == "__main__":
     with socket.socket(fileno=int(sys.argv[3])) as listener:
-        serve(Path(sys.argv[1]), Settings.model_validate_json(sys.argv[2]), listener)
+        serve(
+            Path(sys.argv[1]),
+            Settings.model_validate_json(sys.argv[2]),
+            listener,
+            api_dialect="openrouter",
+        )

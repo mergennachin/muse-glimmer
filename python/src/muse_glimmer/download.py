@@ -12,6 +12,12 @@ from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from .resources import resource_path
 
+# Hub 2 uses httpx2; Hub 1 uses httpx.
+try:
+    from httpx2 import HTTPError as HubHTTPError
+except ImportError:
+    HubHTTPError = httpx.HTTPError
+
 
 class ReleaseSource(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -111,12 +117,12 @@ def pull(release: str, variant: str | None = None) -> Path:
         filename = _select_model(files, source.directory)
         required = _export_files(filename, files)
 
-        print(f"Downloading {repo_id}/{filename} ({_download_size(required, files)})", flush=True)
+        print(f"Downloading Muse Glimmer {release} ({_download_size(required, files)})", flush=True)
         model = Path(hf_hub_download(repo_id, filename, revision=info.sha))
         for companion in required[1:]:
             hf_hub_download(repo_id, companion, revision=info.sha)
-    except httpx.HTTPError as error:
-        raise ValueError(f"Could not download from {repo_id}: {error}") from error
+    except (httpx.HTTPError, HubHTTPError) as error:
+        raise ValueError(f"Could not download Muse Glimmer {release}: {error}") from error
 
     # Keep the snapshot path: resolving its symlink would lose neighboring files.
     destination = default_model_file()

@@ -48,7 +48,7 @@ def acquisition(tmp_path, monkeypatch):
     origin.mkdir()
     git(origin, "init", "-q")
     (origin / "CMakePresets.json").write_text("{}\n")
-    (origin / ".gitignore").write_text("*.pte\n")
+    (origin / ".gitignore").write_text("*.pte\nbuild/\n")
     pin = commit(origin)
     (origin / "later.txt").write_text("not part of the pinned revision\n")
     commit(origin)
@@ -111,14 +111,48 @@ def test_dirty_checkout_is_preserved(acquisition):
     assert (source / "CMakePresets.json").read_text() == '{"local": true}\n'
 
 
-def test_wrong_revision_is_preserved(acquisition):
+@pytest.mark.parametrize("editable", [False, True])
+def test_wrong_revision_is_preserved(acquisition, editable):
     module, _, _ = acquisition
     source = module.source_checkout()
     (source / "local.txt").write_text("local work")
     local_revision = commit(source)
     with pytest.raises(RuntimeError, match="differs from the submodule pin"):
-        module.source_checkout()
+        module.source_checkout(editable=editable)
     assert git(source, "rev-parse", "HEAD") == local_revision
+
+
+def test_editable_snapshot_includes_local_changes_and_excludes_builds(acquisition, tmp_path):
+    module, _, pin = acquisition
+    source = module.source_checkout(editable=True)
+    assert module.local_source_hash(source) == ""
+    (source / "CMakePresets.json").write_text('{"local": true}\n')
+    hud = source / "examples/hud.py"
+    hud.parent.mkdir()
+    hud.write_text("LOCAL_HUD = True\n")
+    fingerprint = module.local_source_hash(source)
+    (source / "model.pte").write_bytes(b"ignored weights")
+    (source / "build").mkdir()
+    (source / "build/worker").write_bytes(b"ignored executable")
+    assert module.source_checkout(editable=True) == source
+    assert module.local_source_hash(source) == fingerprint
+    snapshot = tmp_path / "snapshot"
+    module.copy_sources(source, snapshot, editable=True)
+    assert (snapshot / "CMakePresets.json").read_text() == '{"local": true}\n'
+    assert (snapshot / "examples/hud.py").read_text() == hud.read_text()
+    assert not (snapshot / "model.pte").exists()
+    assert not (snapshot / "build").exists()
+    assert not (snapshot / ".git").exists()
+    git(source, "add", "examples/hud.py")
+    assert module.local_source_hash(source) == fingerprint
+    hud.write_text("LOCAL_HUD = False\n")
+    assert module.local_source_hash(source) != fingerprint
+    fingerprint = module.local_source_hash(source)
+    hud.unlink()
+    assert module.local_source_hash(source) != fingerprint
+    assert git(source, "rev-parse", "HEAD") == pin
+    with pytest.raises(RuntimeError, match="must be clean"):
+        module.source_checkout()
 
 
 def test_sdist_roundtrip_without_git(acquisition, tmp_path):
@@ -193,3 +227,11 @@ def test_only_required_dependencies_are_initialized(acquisition, monkeypatch, tm
     (source / "deps/needed/file.txt").write_text("local changes")
     with pytest.raises(RuntimeError, match="clean"):
         module.source_checkout()
+    assert module.source_checkout(editable=True) == source
+    fingerprint = module.local_source_hash(source)
+    (source / "deps/needed/new.cpp").write_text("// new source\n")
+    assert module.local_source_hash(source) != fingerprint
+    snapshot = tmp_path / "snapshot"
+    module.copy_sources(source, snapshot, editable=True)
+    assert (snapshot / "deps/needed/file.txt").read_text() == "local changes"
+    assert (snapshot / "deps/needed/new.cpp").read_text() == "// new source\n"

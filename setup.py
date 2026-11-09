@@ -3,6 +3,7 @@
 import json
 import platform
 import runpy
+import shutil
 from pathlib import Path
 
 from setuptools import setup
@@ -22,6 +23,11 @@ SHARED_DATA = (
 
 class BuildPy(build_py):
     def run(self):
+        if not self.editable_mode:
+            # Removed modules and native assets must not survive a previous build.
+            package = Path(self.build_lib) / "muse_glimmer"
+            if package.exists():
+                shutil.rmtree(package)
         super().run()
         if not self.editable_mode:
             for name in SHARED_DATA:
@@ -57,6 +63,13 @@ class SourceDist(sdist):
         super().make_release_tree(base_dir, files)
         destination = Path(base_dir) / "third-party/executorch"
         self.acquisition["copy_sources"](self.source, destination)
+        # Keep the source archive below PyPI's size limit without dropping build inputs.
+        for path in destination.rglob("*"):
+            if path.is_file() and (
+                "docs" in path.relative_to(destination).parts
+                or path.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".mp4", ".svg", ".pdf"}
+            ):
+                path.unlink()
         (destination.parent / "executorch-source.json").write_text(
             json.dumps(self.acquisition["source_metadata"]()) + "\n"
         )

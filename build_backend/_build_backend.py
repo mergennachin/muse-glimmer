@@ -14,10 +14,9 @@ from setuptools.build_meta import (  # noqa: F401
 )
 
 
-def _compile():
-    runpy.run_path(
-        str(Path(__file__).resolve().parents[1] / "packaging/build_native.py"), run_name="__main__"
-    )
+def _compile(*, editable=False):
+    build = runpy.run_path(str(Path(__file__).resolve().parents[1] / "packaging/build_native.py"))
+    build["main"](editable=editable)
 
 
 def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
@@ -26,5 +25,5 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
 
 
 def build_editable(wheel_directory, config_settings=None, metadata_directory=None):
-    _compile()
+    _compile(editable=True)
     return _setuptools.build_editable(wheel_directory, config_settings, metadata_directory)
