@@ -5,7 +5,7 @@ backend-path = ["build_backend"]
 
 [project]
 name = "muse-glimmer"
-version = "0.1.0.dev2"
+version = "0.1.0.dev3"
 description = "Serve Muse Glimmer locally"
 dynamic = ["readme", "urls"]
 license = "Apache-2.0"

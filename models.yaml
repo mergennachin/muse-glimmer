@@ -1,10 +1,28 @@
-# Release versions must be quoted. Variant names omit the backend; platform keys
-# are <system>-<machine>, lowercase, as reported by Python's platform module.
+# Release versions must be quoted. Variant names match checkpoint folders.
+# Platform keys are <system>-<machine>, lowercase, from Python's platform module.
+# dflash selects the serving mode automatically after pull.
 "1.0":
-  default_variant: text-solo
+  default_variant: muse-glimmer-k-quant-17G-128K-text-dflash-metal
   variants:
-    text-solo:
+    muse-glimmer-k-quant-17G-128K-text-dflash-metal:
       darwin-arm64:
         repo_id: SocialLocalMobile/Muse-Glimmer-30B-ExecuTorch-PTE
-        revision: 0965b3111e7d010cc8d24f00260fe0e9d1237a1b
-        directory: text-solo-metal
+        revision: 2b3e8ae56d38e4e5901e390a707d6ccf8c9c6d7d
+        directory: muse-glimmer-k-quant-17G-128K-text-dflash-metal
+        dflash: true
+    muse-glimmer-k-quant-17G-128K-text-solo-metal:
+      darwin-arm64:
+        repo_id: SocialLocalMobile/Muse-Glimmer-30B-ExecuTorch-PTE
+        revision: 2b3e8ae56d38e4e5901e390a707d6ccf8c9c6d7d
+        directory: muse-glimmer-k-quant-17G-128K-text-solo-metal
+    muse-glimmer-k-quant-dynamic-128K-text-dflash-metal:
+      darwin-arm64:
+        repo_id: SocialLocalMobile/Muse-Glimmer-30B-ExecuTorch-PTE
+        revision: 2b3e8ae56d38e4e5901e390a707d6ccf8c9c6d7d
+        directory: muse-glimmer-k-quant-dynamic-128K-text-dflash-metal
+        dflash: true
+    muse-glimmer-k-quant-dynamic-128K-text-solo-metal:
+      darwin-arm64:
+        repo_id: SocialLocalMobile/Muse-Glimmer-30B-ExecuTorch-PTE
+        revision: 2b3e8ae56d38e4e5901e390a707d6ccf8c9c6d7d
+        directory: muse-glimmer-k-quant-dynamic-128K-text-solo-metal

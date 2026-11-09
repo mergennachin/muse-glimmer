@@ -25,6 +25,14 @@ class ReleaseSource(BaseModel):
     repo_id: str
     revision: str
     directory: str
+    dflash: bool = False
+
+
+class PulledModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: Path
+    dflash: bool = False
 
 
 class ModelRelease(BaseModel):
@@ -66,12 +74,17 @@ def default_model_file() -> Path:
     return user_data_path("muse-glimmer", appauthor=False) / "default-model"
 
 
-def default_model() -> Path | None:
+def default_model() -> PulledModel | None:
     try:
         value = default_model_file().read_text().strip()
     except FileNotFoundError:
         return None
-    return Path(value) if value else None
+    if not value:
+        return None
+    if value.startswith("{"):
+        return PulledModel.model_validate_json(value)
+    # Existing installations stored only the model path.
+    return PulledModel(path=Path(value))
 
 
 def _export_files(model: str, files: dict[str, int | None]) -> list[str]:
@@ -117,7 +130,7 @@ def pull(release: str, variant: str | None = None) -> Path:
         filename = _select_model(files, source.directory)
         required = _export_files(filename, files)
 
-        print(f"Downloading Muse Glimmer {release} ({_download_size(required, files)})", flush=True)
+        print(f"Downloading {source.directory} ({_download_size(required, files)})", flush=True)
         model = Path(hf_hub_download(repo_id, filename, revision=info.sha))
         for companion in required[1:]:
             hf_hub_download(repo_id, companion, revision=info.sha)
@@ -131,7 +144,9 @@ def pull(release: str, variant: str | None = None) -> Path:
     temporary = Path(file.name)
     try:
         with file:
-            file.write(str(model.absolute()) + "\n")
+            file.write(
+                PulledModel(path=model.absolute(), dflash=source.dflash).model_dump_json() + "\n"
+            )
         temporary.replace(destination)
     finally:
         temporary.unlink(missing_ok=True)

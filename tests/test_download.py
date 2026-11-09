@@ -1,7 +1,6 @@
 """CLI download behavior with mocked Hub calls; no model weights are transferred."""
 
 import importlib
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, call
 
@@ -58,35 +57,39 @@ def catalog(tmp_path, monkeypatch):
     monkeypatch.setattr(download, "resource_path", lambda name: path)
 
 
-@pytest.mark.parametrize("variant", [None, "text-solo"])
-def test_pull_then_serve_uses_downloaded_model(hub, monkeypatch, capsys, variant):
-    files(
-        hub,
-        "text-solo-metal/text-solo-metal.pte",
-        "text-image-metal/vision.pte",
-        "text-solo-sm80/model.pte",
-        "README.md",
-        "tokenizer.json",
-    )
+@pytest.mark.parametrize(
+    ("variant", "dflash"),
+    [(None, True)]
+    + [
+        (f"muse-glimmer-k-quant-{quant}-128K-text-{mode}-metal", mode == "dflash")
+        for quant in ("17G", "dynamic")
+        for mode in ("dflash", "solo")
+    ],
+)
+def test_pull_then_serve_uses_downloaded_model(hub, monkeypatch, capsys, variant, dflash):
+    folder = variant or "muse-glimmer-k-quant-17G-128K-text-dflash-metal"
+    filename = f"{folder}/{folder}.pte"
+    files(hub, filename, "other/model.pte", "README.md", "tokenizer.json")
     args = ["pull", "1.0"]
     if variant is not None:
         args.extend(["--variant", variant])
     assert main(args) == 0
     output = capsys.readouterr().out
-    assert "Default model: Muse Glimmer 1.0" in output
+    assert f"Default model: {folder}" in output
     assert "Run muse-glimmer serve" in output
     assert "SocialLocalMobile" not in output
-    model = hub.snapshot / "text-solo-metal/text-solo-metal.pte"
-    assert hub.state.read_text().strip() == str(model)
-    hub.api.model_info.assert_called_once_with(
+    model = hub.snapshot / filename
+    assert download.default_model().path == model
+    assert download.default_model().dflash is dflash
+    hub.api.model_info.assert_called_once()
+    assert hub.api.model_info.call_args.args == (
         "SocialLocalMobile/Muse-Glimmer-30B-ExecuTorch-PTE",
-        revision="0965b3111e7d010cc8d24f00260fe0e9d1237a1b",
-        files_metadata=True,
     )
+    # Catalog entries must pin an immutable snapshot, not a moving branch.
+    revision = hub.api.model_info.call_args.kwargs["revision"]
+    assert len(revision) == 40 and all(c in "0123456789abcdef" for c in revision)
     hub.fetch.assert_called_once_with(
-        "SocialLocalMobile/Muse-Glimmer-30B-ExecuTorch-PTE",
-        "text-solo-metal/text-solo-metal.pte",
-        revision=hub.info.sha,
+        "SocialLocalMobile/Muse-Glimmer-30B-ExecuTorch-PTE", filename, revision=hub.info.sha
     )
 
     # A new invocation serves offline, without fetching metadata or downloading.
@@ -96,6 +99,7 @@ def test_pull_then_serve_uses_downloaded_model(hub, monkeypatch, capsys, variant
     monkeypatch.setattr(runtime, "serve", serve)
     assert main(["serve"]) == 0
     assert serve.call_args.args[0] == model
+    assert serve.call_args.args[1].dflash is dflash
 
 
 @pytest.mark.parametrize(
@@ -148,7 +152,7 @@ def test_release_catalog_selects_variant_and_platform_location(
     hub.api.model_info.assert_called_once_with(
         f"owner/{repo}", revision=f"{repo}-v2", files_metadata=True
     )
-    assert download.default_model() == hub.snapshot / directory / "model.pte"
+    assert download.default_model().path == hub.snapshot / directory / "model.pte"
     expected = [call(f"owner/{repo}", f"{directory}/model.pte", revision=hub.info.sha)]
     if directory in {"cpu", "vision-metal"}:
         expected.append(call(f"owner/{repo}", f"{directory}/pos_embed.bin", revision=hub.info.sha))
@@ -197,14 +201,15 @@ def test_repository_id_is_rejected_before_contacting_hub(hub, capsys, repo_id, v
     assert hub.state.read_text() == "/previous/model.pte\n"
 
 
-@pytest.mark.parametrize("variant", ["missing", "text-solo-metal"])
-def test_invalid_release_variant_lists_logical_names_without_downloading(hub, capsys, variant):
+@pytest.mark.parametrize("variant", ["missing", "unknown-folder"])
+def test_invalid_release_variant_lists_folder_names_without_downloading(hub, capsys, variant):
     hub.state.parent.mkdir()
     hub.state.write_text("/previous/model.pte\n")
     assert main(["pull", "1.0", "--variant", variant]) == 1
     error = capsys.readouterr().err
     assert f"Unknown variant {variant!r}" in error
-    assert "Available variants: text-solo." in error
+    assert "Available variants: " in error
+    assert "muse-glimmer-k-quant-17G-128K-text-dflash-metal" in error
     hub.api.model_info.assert_not_called()
     hub.fetch.assert_not_called()
     assert hub.state.read_text() == "/previous/model.pte\n"
@@ -213,7 +218,7 @@ def test_invalid_release_variant_lists_logical_names_without_downloading(hub, ca
 def test_selected_nested_export_downloads_only_matching_vision_data(hub, catalog):
     files(hub, "solo/model.pte", "vision/model.pte", "vision/pos_embed.bin", "other.bin")
     assert main(["pull", "2.0", "--variant", "text-image"]) == 0
-    assert download.default_model() == hub.snapshot / "vision/model.pte"
+    assert download.default_model().path == hub.snapshot / "vision/model.pte"
     assert hub.fetch.call_args_list == [
         call("owner/repo", "vision/model.pte", revision=hub.info.sha),
         call("owner/repo", "vision/pos_embed.bin", revision=hub.info.sha),
@@ -244,10 +249,10 @@ def test_invalid_selection_does_not_download_or_change_default(
 
 @pytest.mark.parametrize("failure_at", ["metadata", "model", "positions"])
 @pytest.mark.parametrize("transport", ["httpx", "httpx2"])
-def test_download_failure_preserves_previous_default(hub, failure_at, capsys, transport):
+def test_download_failure_preserves_previous_default(hub, catalog, failure_at, capsys, transport):
     if importlib.util.find_spec(transport) is None:
         pytest.skip(f"{transport} is not installed with this Hub version")
-    files(hub, "text-solo-metal/model.pte", "text-solo-metal/pos_embed.bin")
+    files(hub, "model.pte", "pos_embed.bin")
     hub.state.parent.mkdir()
     hub.state.write_text("/previous/model.pte\n")
     error = importlib.import_module(transport).ConnectError("connection lost")
@@ -256,8 +261,8 @@ def test_download_failure_preserves_previous_default(hub, failure_at, capsys, tr
     elif failure_at == "model":
         hub.fetch.side_effect = error
     else:
-        hub.fetch.side_effect = [str(hub.snapshot / "text-solo-metal/model.pte"), error]
-    assert main(["pull", "1.0"]) == 1
+        hub.fetch.side_effect = [str(hub.snapshot / "model.pte"), error]
+    assert main(["pull", "2.0"]) == 1
     assert "connection lost" in capsys.readouterr().err
     assert hub.state.read_text() == "/previous/model.pte\n"
 
@@ -276,7 +281,7 @@ def test_latest_pull_replaces_default(hub, catalog):
     download.pull("2.0")
     files(hub, "vision/second.pte")
     selected = download.pull("2.0", "text-image")
-    assert download.default_model() == selected
+    assert download.default_model().path == selected
     assert list(hub.state.parent.iterdir()) == [hub.state]
 
 
@@ -284,6 +289,7 @@ def test_latest_pull_replaces_default(hub, catalog):
 def test_explicit_model_overrides_pulled_default(hub, catalog, tmp_path, monkeypatch, source, kind):
     files(hub, "model.pte")
     downloaded = download.pull("2.0")
+    hub.state.write_text(download.PulledModel(path=downloaded, dflash=True).model_dump_json())
     selected = tmp_path / "local.pte"
     selected.write_bytes(b"local")
     path = selected if kind == "file" else selected.parent
@@ -298,7 +304,8 @@ def test_explicit_model_overrides_pulled_default(hub, catalog, tmp_path, monkeyp
     monkeypatch.setattr(runtime, "serve", serve)
     assert main(args) == 0
     assert serve.call_args.args[0] == selected
-    assert download.default_model() == downloaded
+    assert serve.call_args.args[1].dflash is False
+    assert download.default_model().path == downloaded
 
 
 def test_deleted_download_has_recovery_hint(hub, catalog, capsys):
@@ -319,9 +326,9 @@ def test_snapshot_symlink_is_preserved_for_vision(hub, catalog, tmp_path):
     positions.write_bytes(b"positions")
     hub.fetch.side_effect = [str(model), str(positions)]
     download.pull("2.0")
-    assert download.default_model() == model
+    assert download.default_model().path == model
     assert runtime.resolve_model(hub.snapshot) == model
-    assert Path(hub.state.read_text().strip()).with_name("pos_embed.bin").is_file()
+    assert download.default_model().path.with_name("pos_embed.bin").is_file()
 
 
 def test_download_size_includes_only_selected_export_and_companions(hub, catalog, capsys):
@@ -335,7 +342,7 @@ def test_download_size_includes_only_selected_export_and_companions(hub, catalog
         }.items()
     ]
     assert main(["pull", "2.0", "--variant", "text-image"]) == 0
-    assert "Downloading Muse Glimmer 2.0 (19.1 GB)" in capsys.readouterr().out
+    assert "Downloading ./vision/ (19.1 GB)" in capsys.readouterr().out
     assert hub.fetch.call_count == 2
 
 
@@ -354,7 +361,7 @@ def test_missing_file_sizes_are_not_reported_as_zero(hub, catalog, capsys):
         SimpleNamespace(rfilename="vision/model.pte", size=100),
     ]
     assert main(["pull", "2.0"]) == 0
-    assert "Downloading Muse Glimmer 2.0 (size unknown)" in capsys.readouterr().out
+    assert "Downloading . (size unknown)" in capsys.readouterr().out
     hub.fetch.assert_called_once_with("owner/repo", "model.pte", revision=hub.info.sha)
 
 
@@ -365,3 +372,41 @@ def test_empty_default_does_not_select_current_directory(hub, monkeypatch, capsy
     (hub.state.parent / "unselected.pte").write_bytes(b"model")
     assert main(["serve"]) == 1
     assert "muse-glimmer pull" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("override", [None, "cli", "config"])
+def test_pulled_dflash_setting_and_explicit_overrides(hub, monkeypatch, tmp_path, override):
+    source = download.ReleaseSource(repo_id="owner/repo", revision="v1", directory=".", dflash=True)
+    monkeypatch.setattr(download, "_release_source", lambda *args: source)
+    files(hub, "model.pte")
+    download.pull("1.0")
+    serve = Mock()
+    monkeypatch.setattr(runtime, "serve", serve)
+    args = ["serve"]
+    if override == "cli":
+        args.append("--no-dflash")
+    elif override == "config":
+        config = tmp_path / "settings.toml"
+        config.write_text("dflash = false\n")
+        args.extend(["--config", str(config)])
+    assert main(args) == 0
+    assert serve.call_args.args[1].dflash is (override is None)
+
+    # Pulling a solo checkpoint must reset the mode saved by a previous pull.
+    source.dflash = False
+    download.pull("1.0")
+    assert main(["serve"]) == 0
+    assert serve.call_args.args[1].dflash is False
+
+
+def test_legacy_default_path_still_serves(hub, monkeypatch):
+    model = hub.snapshot / "old.pte"
+    model.parent.mkdir(parents=True)
+    model.write_bytes(b"old model")
+    hub.state.parent.mkdir()
+    hub.state.write_text(str(model) + "\n")
+    serve = Mock()
+    monkeypatch.setattr(runtime, "serve", serve)
+    assert main(["serve"]) == 0
+    assert serve.call_args.args[0] == model
+    assert serve.call_args.args[1].dflash is False

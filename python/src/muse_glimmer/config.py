@@ -21,8 +21,11 @@ class Settings(BaseModel):
     dflash_n_draft: int = Field(ge=0)
 
 
-def load_settings(overrides: dict, config_path: Path | None = None) -> Settings:
+def load_settings(
+    overrides: dict, config_path: Path | None = None, *, model_defaults: dict | None = None
+) -> Settings:
     values = tomllib.loads(resource_path("default_config.toml").read_text())
+    values.update(model_defaults or {})
     if config_path is not None:
         if not config_path.is_file():
             raise ValueError(f"Configuration file does not exist: {config_path}")

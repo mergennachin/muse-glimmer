@@ -16,7 +16,7 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("release", help="Release version (e.g. 1.0)")
     command.add_argument(
         "--variant",
-        help="Model variant (e.g. text-solo); defaults to the release's preferred variant",
+        help="Checkpoint folder name; defaults to the release's preferred variant",
     )
     command = commands.add_parser("serve", help="Start the local server")
     command.add_argument("--config", type=Path)
@@ -38,8 +38,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "pull":
             from .download import pull
 
-            pull(args.release, args.variant)
-            print(f"Default model: Muse Glimmer {args.release}\nRun muse-glimmer serve to start serving.")
+            model = pull(args.release, args.variant)
+            print(f"Default model: {model.parent.name}\nRun muse-glimmer serve to start serving.")
             return 0
 
         values = {key: value for key, value in vars(args).items() if key in Settings.model_fields}
@@ -49,7 +49,12 @@ def main(argv: list[str] | None = None) -> int:
         else:
             from .download import default_model
 
-            model = default_model()
+            pulled = default_model()
+            model = pulled.path if pulled else None
+            if pulled:
+                settings = load_settings(
+                    values, args.config, model_defaults={"dflash": pulled.dflash}
+                )
         if model is None:
             raise ValueError("Run muse-glimmer pull 1.0 or pass --model /path/to/model.pte.")
         from .runtime import resolve_model, serve

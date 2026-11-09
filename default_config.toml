@@ -1,5 +1,5 @@
 # Shared serving defaults, matching the upstream Muse Glimmer serving example.
-# Precedence: CLI flags > explicit --config file > this file.
+# Precedence: CLI flags > explicit --config file > pulled model defaults > this file.
 # Config files are read in place. Relative paths use the current directory.
 # Example: muse-glimmer serve --model /path/model.pte --config ./config.toml
 
@@ -21,7 +21,8 @@ concurrency = 4
 # Reusable prompt-prefix snapshots; 0 disables caching.
 prefix_cache_entries = 32
 
-# Enable for DFlash exports. Override with --dflash or --no-dflash.
+# Pulled variants select DFlash automatically. For a local DFlash export, enable
+# this setting or pass --dflash. --no-dflash explicitly disables it.
 dflash = false
 
 # Draft proposals per step, used only with DFlash. 0 uses the exported maximum.

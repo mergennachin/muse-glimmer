@@ -17,8 +17,9 @@ muse-glimmer pull 1.0
 muse-glimmer serve
 ```
 
-`pull` selects the model for your platform. Use `pull 1.0 --variant text-solo`
-to select a variant, or `serve --model <path>` for a local model.
+`pull` defaults to `muse-glimmer-k-quant-17G-128K-text-dflash-metal`.
+Use `pull 1.0 --variant <folder-name>` to choose a checkpoint,
+or `serve --model <path>` for a local model.
 
 The server runs at `http://127.0.0.1:8000`. Press **Ctrl+C** to stop.
 The terminal shows a live HUD.
