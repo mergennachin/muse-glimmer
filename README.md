@@ -13,11 +13,24 @@ The first installation needs an internet connection. From this repository:
 
 ```sh
 pip install -e .
-muse-glimmer pull SocialLocalMobile/Muse-Glimmer-30B-ExecuTorch-PTE
+muse-glimmer pull 1.0
 muse-glimmer serve
 ```
 
-Use `pull --variant <name>` to choose a specific folder, or `serve --model <path>` for a local model.
+`pull` selects the preferred export for your platform using [models.yaml](models.yaml),
+which defines each release's default variant and maps variants and platforms to
+Hugging Face repositories, pinned revisions, and export folders.
+
+Select a variant explicitly with:
+
+```sh
+muse-glimmer pull 1.0 --variant text-solo
+```
+
+The backend is selected automatically. Unknown releases, unknown variants, and unsupported
+platforms are reported before downloading.
+
+Use `serve --model <path>` for a local model.
 
 The server runs at `http://127.0.0.1:8000`. Press **Ctrl+C** to stop.
 

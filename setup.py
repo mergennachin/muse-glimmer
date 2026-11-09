@@ -12,6 +12,7 @@ from setuptools.command.sdist import sdist
 
 SHARED_DATA = (
     "default_config.toml",
+    "models.yaml",
     "tokenizer/tokenizer.json",
     "tokenizer/tokenizer_config.json",
     "tokenizer/chat_template.jinja",

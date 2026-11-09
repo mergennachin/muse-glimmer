@@ -131,6 +131,7 @@ def test_sdist_roundtrip_without_git(acquisition, tmp_path):
         "README.md",
         "LICENSE",
         "default_config.toml",
+        "models.yaml",
     ]:
         shutil.copy2(root / name, module.ROOT / name)
     for name in ["packaging", "build_backend", "python", "tokenizer"]:
@@ -160,6 +161,7 @@ def test_sdist_roundtrip_without_git(acquisition, tmp_path):
         assert not (project / ".git").exists()
         assert not (project / module.SUBMODULE / ".git").exists()
         assert not (project / module.SUBMODULE / "model.pte").exists()
+        assert (project / "models.yaml").read_bytes() == (root / "models.yaml").read_bytes()
         assert json.loads((project / "third-party/executorch-source.json").read_text()) == expected
         acquisition_from_archive = runpy.run_path(str(project / "packaging/source.py"))
         assert acquisition_from_archive["source_checkout"]() == project / module.SUBMODULE

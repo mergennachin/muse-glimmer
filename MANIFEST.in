@@ -1,5 +1,6 @@
 include .gitmodules
 include default_config.toml
+include models.yaml
 recursive-include tokenizer *.json *.jinja README.md
 recursive-include build_backend *.py
 recursive-include packaging *.py

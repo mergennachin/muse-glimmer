@@ -12,10 +12,11 @@ def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="muse-glimmer", description="Serve Muse Glimmer locally")
     root.add_argument("--version", action="version", version=__version__)
     commands = root.add_subparsers(dest="command", required=True)
-    command = commands.add_parser("pull", help="Download a model from Hugging Face")
-    command.add_argument("repo_id", help="Hugging Face repository, e.g. owner/repo")
+    command = commands.add_parser("pull", help="Download a model release for this platform")
+    command.add_argument("release", help="Release version (e.g. 1.0)")
     command.add_argument(
-        "--variant", help="Export directory within the repository ('.' for its root)"
+        "--variant",
+        help="Model variant (e.g. text-solo); defaults to the release's preferred variant",
     )
     command = commands.add_parser("serve", help="Start the local server")
     command.add_argument("--config", type=Path)
@@ -37,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "pull":
             from .download import pull
 
-            model = pull(args.repo_id, args.variant)
+            model = pull(args.release, args.variant)
             print(f"Default model: {model}\nRun muse-glimmer serve to start serving.")
             return 0
 
@@ -50,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
 
             model = default_model()
         if model is None:
-            raise ValueError("Run muse-glimmer pull HF/repo_id or pass --model /path/to/model.pte.")
+            raise ValueError("Run muse-glimmer pull 1.0 or pass --model /path/to/model.pte.")
         from .runtime import resolve_model, serve
 
         model = resolve_model(model)

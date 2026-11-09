@@ -23,6 +23,7 @@ def test_installed_package_uses_its_own_shared_resources(tmp_path, mode):
         "LICENSE",
         "MANIFEST.in",
         "default_config.toml",
+        "models.yaml",
     ]:
         shutil.copy2(root / name, project / name)
     shutil.copytree(
@@ -70,6 +71,8 @@ from muse_glimmer.config import load_settings
 from muse_glimmer.resources import resource_path
 assert resource_path('default_config.toml').resolve().is_relative_to(Path(sys.argv[1]))
 assert load_settings({}).port == int(sys.argv[2])
+assert resource_path('models.yaml').resolve().is_relative_to(Path(sys.argv[1]))
+assert resource_path('models.yaml').read_bytes() == (Path(sys.argv[3]) / 'models.yaml').read_bytes()
 for original in (Path(sys.argv[3]) / 'tokenizer').iterdir():
     assert (resource_path('tokenizer') / original.name).read_bytes() == original.read_bytes()
 """,

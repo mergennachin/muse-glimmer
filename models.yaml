@@ -1,0 +1,10 @@
+# Release versions must be quoted. Variant names omit the backend; platform keys
+# are <system>-<machine>, lowercase, as reported by Python's platform module.
+"1.0":
+  default_variant: text-solo
+  variants:
+    text-solo:
+      darwin-arm64:
+        repo_id: SocialLocalMobile/Muse-Glimmer-30B-ExecuTorch-PTE
+        revision: 0965b3111e7d010cc8d24f00260fe0e9d1237a1b
+        directory: text-solo-metal
