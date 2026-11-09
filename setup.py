@@ -4,6 +4,7 @@ import json
 import platform
 import runpy
 import shutil
+import tomllib
 from pathlib import Path
 
 from setuptools import setup
@@ -85,4 +86,21 @@ class MacWheel(bdist_wheel):
         return "py3", "none", f"macosx_{minimum}_0_arm64"
 
 
-setup(cmdclass={"bdist_wheel": MacWheel, "build_py": BuildPy, "sdist": SourceDist})
+root = Path(__file__).parent
+version = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
+repository = "https://github.com/mergennachin/muse-glimmer"
+source_url = f"{repository}/tree/v{version}"
+# Keep the repository README focused on source installs; PyPI uses the package.
+readme = (root / "README.md").read_text()
+readme = readme.replace(" From this repository:", "")
+readme = readme.replace("pip install -e .", "pip install --pre muse-glimmer")
+readme = readme.replace(
+    "(default_config.toml)", f"({repository}/blob/v{version}/default_config.toml)"
+)
+
+setup(
+    cmdclass={"bdist_wheel": MacWheel, "build_py": BuildPy, "sdist": SourceDist},
+    long_description=readme,
+    long_description_content_type="text/markdown",
+    project_urls={"Repository": repository, "Source": source_url, "Issues": f"{repository}/issues"},
+)

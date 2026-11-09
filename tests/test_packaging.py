@@ -8,6 +8,7 @@ import sys
 import sysconfig
 import venv
 import zipfile
+from email.parser import Parser
 from pathlib import Path
 
 import pytest
@@ -58,6 +59,17 @@ def test_installed_package_uses_its_own_shared_resources(tmp_path, mode):
     wheel = next((tmp_path / "dist").glob("*.whl"))
     with zipfile.ZipFile(wheel) as archive:
         assert not any(name.endswith("/removed_module.py") for name in archive.namelist())
+        metadata_name = next(
+            name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+        )
+        metadata = Parser().parsestr(archive.read(metadata_name).decode())
+        description = metadata.get_payload()
+        assert "pip install --pre muse-glimmer" in description
+        assert "pip install -e ." not in description
+        source_url = f"https://github.com/mergennachin/muse-glimmer/tree/v{metadata['Version']}"
+        assert f"Source, {source_url}" in metadata.get_all("Project-URL")
+        assert f"/blob/v{metadata['Version']}/default_config.toml" in description
+    assert "pip install -e ." in (project / "README.md").read_text()
     run([str(python), "-I", "-m", "pip", "install", "--no-index", "--no-deps", str(wheel)])
     if mode == "wheel":
         shutil.rmtree(project)
