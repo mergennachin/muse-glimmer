@@ -20,6 +20,21 @@ def run(argv: list[str], cwd: Path) -> None:
     subprocess.run(argv, cwd=cwd, check=True)
 
 
+def check_metal() -> None:
+    # `xcrun --find metal` succeeds even when Xcode 26+ lacks its separately downloaded
+    # Metal toolchain, so run the compiler to fail before the long native build starts.
+    argv = ["xcrun", "-sdk", "macosx", "metal", "--version"]
+    print("+ " + " ".join(argv), flush=True)
+    result = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        raise RuntimeError(
+            f"The Metal compiler is not usable: {detail}\n"
+            "Accept the Xcode license with `sudo xcodebuild -license accept` and install "
+            "the Metal toolchain with `xcodebuild -downloadComponent MetalToolchain`."
+        )
+
+
 def main(*, editable: bool = False) -> None:
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         raise RuntimeError("Source installation currently supports Apple silicon macOS.")
@@ -28,7 +43,7 @@ def main(*, editable: bool = False) -> None:
             raise RuntimeError(
                 f"Missing build tool: {tool}. Install Xcode with Metal tools and the Python build requirements."
             )
-    run(["xcrun", "--find", "metal"], ROOT)
+    check_metal()
     acquisition = runpy.run_path(str(ROOT / "packaging/source.py"))
     source = acquisition["source_checkout"](editable=editable)
     revision = acquisition["source_metadata"]()["revision"]

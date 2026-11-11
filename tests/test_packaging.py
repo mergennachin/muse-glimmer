@@ -151,3 +151,26 @@ def test_failed_staging_preserves_installed_runtime(tmp_path, monkeypatch, failu
         assert (package / name / "previous").read_bytes() == b"working install"
         assert len(list((package / name).iterdir())) == 1
     assert sorted(path.name for path in package.iterdir()) == ["_native", "_vendor"]
+
+
+def test_missing_metal_toolchain_fails_before_native_build(monkeypatch):
+    root = Path(__file__).resolve().parents[1]
+    check_metal = runpy.run_path(str(root / "packaging/build_native.py"))["check_metal"]
+    calls = []
+
+    def missing_toolchain(argv, **kwargs):
+        calls.append(argv)
+        # Xcode 26+ resolves `xcrun --find metal` but cannot run it without the component.
+        return subprocess.CompletedProcess(
+            argv,
+            72,
+            "",
+            "error: error: cannot execute tool 'metal' due to missing Metal Toolchain; "
+            "use: xcodebuild -downloadComponent MetalToolchain\n",
+        )
+
+    monkeypatch.setattr(subprocess, "run", missing_toolchain)
+    with pytest.raises(RuntimeError, match="sudo xcodebuild -license accept") as error:
+        check_metal()
+    assert "missing Metal Toolchain" in str(error.value)
+    assert calls == [["xcrun", "-sdk", "macosx", "metal", "--version"]]

@@ -9,6 +9,13 @@ Serve [Muse Glimmer 30B](https://ai.meta.com/research/publications/muse-glimmer-
 ## Install and serve
 
 You need Python 3.11+, Git, and Xcode with the Metal toolchain.
+Since Xcode 26 the Metal toolchain is a separate download. After installing or updating Xcode, run once:
+
+```sh
+sudo xcodebuild -license accept
+xcodebuild -downloadComponent MetalToolchain
+```
+
 The first installation needs an internet connection. From this repository:
 
 ```sh
