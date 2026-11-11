@@ -1,6 +1,6 @@
 # muse-glimmer
 
-Serve Muse Glimmer locally. Development preview.
+Serve [Muse Glimmer 30B](https://ai.meta.com/research/publications/muse-glimmer-30b-an-on-device-agentic-model/) locally. Development preview.
 
 ## Supported platforms
 
@@ -17,7 +17,6 @@ muse-glimmer pull 1.0
 muse-glimmer serve
 ```
 
-`pull` defaults to `muse-glimmer-k-quant-17G-128K-text-dflash-metal`.
 Use `pull 1.0 --variant <folder-name>` to choose a checkpoint,
 or `serve --model <path>` for a local model.
 
