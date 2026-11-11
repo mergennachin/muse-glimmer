@@ -97,6 +97,7 @@ readme = readme.replace("pip install -e .", "pip install --pre muse-glimmer")
 readme = readme.replace(
     "(default_config.toml)", f"({repository}/blob/v{version}/default_config.toml)"
 )
+readme = readme.replace('src="img/', f'src="{repository}/raw/v{version}/img/')
 
 setup(
     cmdclass={"bdist_wheel": MacWheel, "build_py": BuildPy, "sdist": SourceDist},

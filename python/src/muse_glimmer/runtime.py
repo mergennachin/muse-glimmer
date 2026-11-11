@@ -78,6 +78,7 @@ def serve(
     listener: socket | None = None,
     *,
     api_dialect: str = "openai",
+    evict_idle_sessions: bool = False,
 ) -> None:
     if not (native_dir() / "muse_glimmer_batching_worker").is_file():
         raise ValueError("Native runtime missing. Reinstall muse-glimmer to build it.")
@@ -85,7 +86,10 @@ def serve(
 
     from ._vendor.muse import serve_batching as serving
 
-    args = serving._parse_args([*server_options(model, settings), "--api-dialect", api_dialect])
+    options = [*server_options(model, settings), "--api-dialect", api_dialect]
+    if evict_idle_sessions:
+        options.append("--evict-idle-sessions")
+    args = serving._parse_args(options)
     app = serving.build_app_from_args(args)
 
     config = uvicorn.Config(app, host=settings.host, port=settings.port, log_level="info")

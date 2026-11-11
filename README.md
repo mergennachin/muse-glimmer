@@ -26,7 +26,7 @@ The terminal shows a live HUD.
 
 ## Run Muse (coding agent) with the local model
 
-With Muse installed, run this from your project directory:
+With [Muse](https://dev.meta.ai/products/muse-code) installed, run this from your project directory:
 
 ```sh
 muse-glimmer serve --launch muse
@@ -34,6 +34,22 @@ muse-glimmer serve --launch muse
 
 Muse uses the local model through its OpenRouter provider. No API key is needed.
 Exiting Muse also stops the server.
+
+<img src="img/muse-code-demo.png" alt="Muse coding agent building a Pomodoro timer with Muse Glimmer" width="600">
+
+## Chat with Open WebUI
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and Open WebUI once:
+
+```sh
+uv tool install --python 3.12 open-webui==0.13.3
+muse-glimmer serve --launch open-webui
+```
+
+Your browser opens at `http://127.0.0.1:8080` with Muse Glimmer selected. No login is needed.
+Chat history is saved locally. The HUD stays in the terminal; **Ctrl+C** stops both servers.
+
+<img src="img/open-webui-demo.png" alt="Chatting with Muse Glimmer in Open WebUI" width="600">
 
 ## Smoke test
 
