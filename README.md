@@ -27,7 +27,7 @@ Create a conda environment
 Alternatively, create a virtual environment with uv:
 
 ```bash
-uv venv --python 3.12 .venv
+uv venv --python 3.12 --seed .venv
 source .venv/bin/activate
 ```
 
