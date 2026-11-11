@@ -9,13 +9,24 @@ Serve [Muse Glimmer 30B](https://ai.meta.com/research/publications/muse-glimmer-
 ## Install and serve
 
 ### Environment Setup
- Clone the repository from GitHub and create a conda environment. Venv can be used in place of conda.
-   ```bash
-   git clone --recursive https://github.com/mergennachin/muse-glimmer.git 
-   cd muse-glimmer
-   conda create -yn glimmer python=3.11
-   conda activate glimmer
-   ```
+Clone the repository from GitHub and create a conda environment. Venv can be used in place of conda.
+  ```bash
+  git clone --recursive https://github.com/mergennachin/muse-glimmer.git 
+  cd muse-glimmer
+  conda create -yn glimmer python=3.12
+  conda activate glimmer
+  ```
+Alternatively, create a virtual environment with uv:
+
+```bash
+uv venv --python 3.12 .venv
+```
+
+Activate it on macOS or Linux:
+
+```bash
+source .venv/bin/activate
+```
 
 You will need Python 3.11+, Git, and Xcode with the Metal toolchain.
 Since Xcode 26 the Metal toolchain is a separate download. After installing or updating Xcode, run once:
@@ -46,8 +57,8 @@ With [Muse](https://dev.meta.ai/products/muse-code) installed, run this from you
 ```sh
 muse-glimmer serve --launch muse
 ```
-Replies to initial prompts could take a few minutes, depending on the device. 
-(About 6 minutes on a MBP with M1 Max chip.)
+
+
 Muse uses the local model through its OpenRouter provider. No API key is needed.
 Exiting Muse also stops the server.
 
