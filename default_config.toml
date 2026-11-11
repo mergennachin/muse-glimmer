@@ -1,4 +1,4 @@
-# Shared serving defaults, matching the upstream Muse Glimmer serving example.
+# Shared serving defaults.
 # Precedence: CLI flags > explicit --config file > pulled model defaults > this file.
 # Config files are read in place. Relative paths use the current directory.
 # Example: muse-glimmer serve --model /path/model.pte --config ./config.toml
@@ -19,7 +19,13 @@ context = 131072
 concurrency = 4
 
 # Reusable prompt-prefix snapshots; 0 disables caching.
-prefix_cache_entries = 32
+prefix_cache_entries = 8
+
+# Capture the first prompt of each session ("initial") or every turn ("every").
+# "every" helps retries and revisiting earlier turns. Ignored when caching is disabled.
+# Snapshots stay in memory only. On Mac, each snapshot uses its own KV memory;
+# use fewer cache entries for long conversations.
+prefix_checkpoint_prompt_end = "every"
 
 # Pulled variants select DFlash automatically. For a local DFlash export, enable
 # this setting or pass --dflash. --no-dflash explicitly disables it.

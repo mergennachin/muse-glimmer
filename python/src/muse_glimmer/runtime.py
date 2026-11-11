@@ -64,6 +64,8 @@ def server_options(model: Path, settings: Settings) -> list[str]:
         "--port",
         str(settings.port),
     ]
+    if settings.prefix_cache_entries > 0 and settings.prefix_checkpoint_prompt_end == "every":
+        options.extend(["--prefix-checkpoint-prompt-end", "every"])
     pos_embed = model.with_name("pos_embed.bin")
     if pos_embed.is_file():
         options.extend(["--pos-embed-path", str(pos_embed)])

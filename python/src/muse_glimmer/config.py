@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -17,6 +18,7 @@ class Settings(BaseModel):
     context: int = Field(gt=1)
     concurrency: int = Field(ge=1, le=64)
     prefix_cache_entries: int = Field(ge=0)
+    prefix_checkpoint_prompt_end: Literal["initial", "every"]
     dflash: bool
     dflash_n_draft: int = Field(ge=0)
 

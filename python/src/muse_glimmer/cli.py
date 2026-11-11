@@ -29,6 +29,11 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("--context", type=int)
     command.add_argument("--concurrency", type=int)
     command.add_argument("--prefix-cache-entries", type=int)
+    command.add_argument(
+        "--prefix-checkpoint-prompt-end",
+        choices=["initial", "every"],
+        help="Cache the first prompt per session or every turn (requires prefix caching)",
+    )
     command.add_argument("--dflash", action=argparse.BooleanOptionalAction, default=None)
     command.add_argument("--dflash-n-draft", type=int)
     return root
