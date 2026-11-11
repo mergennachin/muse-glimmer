@@ -9,22 +9,25 @@ Serve [Muse Glimmer 30B](https://ai.meta.com/research/publications/muse-glimmer-
 ## Install and serve
 
 ### Environment Setup
-Clone the repository from GitHub and create a conda environment. Venv can be used in place of conda.
+  
+Clone the repository from GitHub.
+
   ```bash
   git clone --recursive https://github.com/mergennachin/muse-glimmer.git 
   cd muse-glimmer
+  ```
+
+Create a conda environment
+
+  ```bash
   conda create -yn glimmer python=3.12
   conda activate glimmer
   ```
+  
 Alternatively, create a virtual environment with uv:
 
 ```bash
 uv venv --python 3.12 .venv
-```
-
-Activate it on macOS or Linux:
-
-```bash
 source .venv/bin/activate
 ```
 
@@ -37,6 +40,8 @@ xcodebuild -downloadComponent MetalToolchain
 ```
 
 The first installation needs an internet connection. From this repository:
+
+### Install Setup
 
 ```sh
 pip install -e .
