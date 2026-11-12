@@ -71,7 +71,7 @@ Exiting Muse also stops the server.
 
 ## Chat with Open WebUI
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and Open WebUI once:
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and [Open WebUI](https://openwebui.com/) once:
 
 ```sh
 uv tool install --python 3.12 open-webui==0.13.3
