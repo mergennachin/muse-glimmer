@@ -43,6 +43,7 @@ def acquisition(tmp_path, monkeypatch):
     root.mkdir()
     git(root, "init", "-q")
     monkeypatch.setattr(module, "ROOT", root)
+    monkeypatch.setattr(module.platform, "system", lambda: "Darwin")
     monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "file")
     origin = tmp_path / "origin"
     origin.mkdir()

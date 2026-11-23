@@ -17,7 +17,7 @@ from urllib.request import ProxyHandler, build_opener
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(output: Path) -> None:
+def run(output: Path, model: Path | None = None) -> None:
     import muse_glimmer
     from huggingface_hub.constants import HF_HUB_CACHE
 
@@ -33,7 +33,10 @@ def run(output: Path) -> None:
         # Preserve cached weights, but never change the runner owner's selected model.
         env.update(HOME=str(home), HF_HUB_CACHE=HF_HUB_CACHE, NO_COLOR="1")
         command = [sys.executable, "-I", "-m", "muse_glimmer.cli"]
-        subprocess.run([*command, "pull", "1.0"], cwd=home, env=env, check=True, timeout=1200)
+        if model is None:
+            subprocess.run([*command, "pull", "1.0"], cwd=home, env=env, check=True, timeout=1200)
+        else:
+            model = model.expanduser().resolve()
         with socket.socket() as available:
             available.bind(("127.0.0.1", 0))
             port = available.getsockname()[1]
@@ -41,7 +44,7 @@ def run(output: Path) -> None:
         log_path = output / "server.log"
         with log_path.open("w") as log:
             server = subprocess.Popen(
-                [*command, "serve", "--host", "127.0.0.1", "--port", str(port),
+                [*command, "serve", *(["--model", str(model)] if model is not None else []), "--host", "127.0.0.1", "--port", str(port),
                  "--context", "4096", "--concurrency", "4", "--prefix-cache-entries", "8",
                  "--prefix-checkpoint-prompt-end", "every"],
                 cwd=home, env=env, stdout=log, stderr=subprocess.STDOUT,
@@ -95,10 +98,11 @@ def run(output: Path) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("reports/live"))
+    parser.add_argument("--model", type=Path, help="Use a local export instead of pulling a model")
     args = parser.parse_args()
 
     def interrupt(_signum, _frame):
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, interrupt)
-    run(args.output)
+    run(args.output, args.model)

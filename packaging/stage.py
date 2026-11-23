@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import ast
 import json
+import os
+import platform
 import runpy
 import shutil
 import subprocess
@@ -28,7 +30,7 @@ def stage(source: Path, worker_dir: Path, *, editable: bool = False) -> None:
             if destination.exists():
                 shutil.rmtree(destination)
             (staged / name).rename(destination)
-    print(f"Packaged Mac runtime from ExecuTorch {revision}")
+    print(f"Packaged {platform.system()} runtime from ExecuTorch {revision}")
 
 
 def _stage(source: Path, worker_dir: Path, package: Path, *, editable: bool) -> str:
@@ -41,20 +43,26 @@ def _stage(source: Path, worker_dir: Path, package: Path, *, editable: bool) -> 
         if local_changes:
             metadata["local_changes"] = local_changes
     worker = worker_dir / "muse_glimmer_batching_worker"
-    metallib = worker_dir / "mlx.metallib"
-    for path in [worker, metallib]:
+    cuda = platform.system() == "Linux"
+    if cuda:
+        metadata["backend"] = "cuda"
+        metadata["cuda_version"] = "13.2"
+        metadata["cuda_architectures"] = os.environ.get("TORCH_CUDA_ARCH_LIST", "native")
+    artifacts = [worker] if cuda else [worker, worker_dir / "mlx.metallib"]
+    for path in artifacts:
         if not path.is_file():
             raise ValueError(f"Missing native artifact: {path}")
-    architecture = subprocess.check_output(["lipo", "-archs", str(worker)], text=True).strip()
-    if architecture != "arm64":
-        raise ValueError(f"Expected an arm64 worker, found {architecture}")
-    links = subprocess.check_output(["otool", "-L", str(worker)], text=True)
-    for line in links.splitlines()[1:]:
-        dependency = line.strip().split(" (", 1)[0]
-        if not dependency.startswith(("/System/Library/", "/usr/lib/")):
-            raise ValueError(
-                f"Worker depends on an unbundled library: {dependency}. Build a self-contained worker first."
-            )
+    if not cuda:
+        architecture = subprocess.check_output(["lipo", "-archs", str(worker)], text=True).strip()
+        if architecture != "arm64":
+            raise ValueError(f"Expected an arm64 worker, found {architecture}")
+        links = subprocess.check_output(["otool", "-L", str(worker)], text=True)
+        for line in links.splitlines()[1:]:
+            dependency = line.strip().split(" (", 1)[0]
+            if not dependency.startswith(("/System/Library/", "/usr/lib/")):
+                raise ValueError(
+                    f"Worker depends on an unbundled library: {dependency}. Build a self-contained worker first."
+                )
     vendor = package / "_vendor"
     vendor.mkdir(parents=True)
     (vendor / "__init__.py").write_text(
@@ -92,20 +100,25 @@ def _stage(source: Path, worker_dir: Path, package: Path, *, editable: bool) -> 
     (vendor / "provenance.json").write_text(json.dumps(metadata, indent=2) + "\n")
     native = package / "_native"
     native.mkdir()
-    for path in [worker, metallib]:
-        shutil.copy2(path, native / path.name)
+    if cuda:
+        linux = runpy.run_path(str(ROOT / "packaging/linux.py"))
+        linux["bundle"](worker, native)
+    else:
+        for path in artifacts:
+            shutil.copy2(path, native / path.name)
     notices = []
     license_roots = [
-        *acquisition["MLX_SUBMODULES"],
+        *(acquisition["required_submodules"]() if cuda else acquisition["MLX_SUBMODULES"]),
         "extension/llm/tokenizers/third-party/abseil-cpp",
         "extension/llm/tokenizers/third-party/sentencepiece",
         "extension/llm/tokenizers/third-party/re2",
         "extension/llm/tokenizers/third-party/pcre2",
     ]
     build = worker_dir.parents[2]
-    stb = build / "_deps/stb-src"
+    stb = Path(os.environ.get("MUSE_GLIMMER_STB_INCLUDE_DIR", build / "_deps/stb-src"))
     fmt = build / "executorch/backends/mlx/mlx/_deps/fmt-src"
-    for directory in [*(source / relative for relative in license_roots), stb, fmt]:
+    fetched = [stb] if cuda else [stb, fmt]
+    for directory in [*(source / relative for relative in license_roots), *fetched]:
         relative = (
             str(directory.relative_to(source))
             if directory.is_relative_to(source)
@@ -125,5 +138,16 @@ def _stage(source: Path, worker_dir: Path, package: Path, *, editable: bool) -> 
             raise ValueError(f"Missing native dependency license: {directory}")
         for path in paths:
             notices.append(f"--- {relative}/{path.name} ---\n\n{path.read_text()}\n")
+    if cuda:
+        toolkit = Path(shutil.which("nvcc")).resolve().parents[1]
+        eula = toolkit / "EULA.txt"
+        if not eula.is_file():
+            raise ValueError(f"Missing CUDA redistribution license: {eula}")
+        notices.append(f"--- CUDA Toolkit EULA ---\n\n{eula.read_text()}\n")
+        if (native / "libgomp.so.1").is_file():
+            copyright = Path("/usr/share/doc/libgomp1/copyright")
+            if not copyright.is_file():
+                raise ValueError(f"Missing OpenMP runtime license: {copyright}")
+            notices.append(f"--- GNU OpenMP runtime ---\n\n{copyright.read_text()}\n")
     (native / "THIRD_PARTY_NOTICES").write_text("\n".join(notices))
     return revision

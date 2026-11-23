@@ -106,17 +106,23 @@ def run(run_id: int, labels: list[str] | None = None) -> int:
     ).strip()
     run_path = f"repos/{repository}/actions/runs/{run_id}"
     workflow = api(run_path)
-    if workflow["path"] != ".github/workflows/wheel.yml" or workflow["event"] not in {
+    allowed_workflows = {".github/workflows/wheel.yml"}
+    if host[0] == "Linux" and workflow["event"] == "workflow_dispatch":
+        allowed_workflows.add(".github/workflows/wheel-linux-cuda.yml")
+    if workflow["path"] not in allowed_workflows or workflow["event"] not in {
         "push",
         "workflow_dispatch",
     }:
-        raise RuntimeError("Expected a wheel.yml tag or manual workflow run.")
+        raise RuntimeError("Expected a shared wheel release or a manual Linux CUDA build.")
     if workflow["status"] == "completed":
         print(f"Run already completed: {workflow['conclusion']}")
         return 0 if workflow["conclusion"] == "success" else 1
-    source = api(
-        f"repos/{repository}/contents/.github/workflows/wheel.yml?ref={workflow['head_sha']}"
+    source_path = (
+        ".github/workflows/linux_wheel.yml"
+        if workflow["path"] == ".github/workflows/wheel-linux-cuda.yml"
+        else workflow["path"]
     )
+    source = api(f"repos/{repository}/contents/{source_path}?ref={workflow['head_sha']}")
     if "muse-glimmer-${{ github.run_id }}" not in base64.b64decode(source["content"]).decode():
         raise RuntimeError(
             "Start a run from the updated workflow; this run does not support the local runner helper."

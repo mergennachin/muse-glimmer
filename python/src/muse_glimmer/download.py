@@ -228,7 +228,7 @@ def remove_model(version: str | None = None, variant: str | None = None) -> Path
         model, paths = local
     elif selected is not None:
         model = selected.path
-        paths = [model, model.with_name("pos_embed.bin")]
+        paths = [model, model.with_name("pos_embed.bin"), model.with_name("aoti_cuda_blob.ptd")]
     else:
         print("No model selected. Nothing to remove.")
         return None
@@ -293,8 +293,8 @@ def _delete_export(model: Path, paths: set[Path]) -> None:
 
 
 def _export_files(model: str, files: dict[str, int | None]) -> list[str]:
-    positions = str(PurePosixPath(model).with_name("pos_embed.bin"))
-    return [model, positions] if positions in files else [model]
+    companions = [str(PurePosixPath(model).with_name(name)) for name in ("pos_embed.bin", "aoti_cuda_blob.ptd")]
+    return [model, *[name for name in companions if name in files]]
 
 
 def _download_size(names: list[str], files: dict[str, int | None]) -> str:

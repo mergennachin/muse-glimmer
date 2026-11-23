@@ -10,7 +10,8 @@ publish the same bytes to PyPI and GitHub Releases.
 | --- | --- |
 | [workflows/wheel.yml](workflows/wheel.yml) | Coordinate platforms, require all tests, collect artifacts, request approval, publish and verify both registries. |
 | [workflows/mac_wheel.yml](workflows/mac_wheel.yml) | Build the Mac wheel, check installation on Python 3.11/3.13, run the full suite and a live Metal smoke test. |
-| [workflows/linux_wheel.yml](workflows/linux_wheel.yml) | Reserved for CUDA builds and GPU tests; currently disabled and deliberately fails if enabled prematurely. |
+| [workflows/linux_wheel.yml](workflows/linux_wheel.yml) | Build CUDA 13.2 wheels and run installation, full-suite and live GPU tests; shared releases remain disabled pending validation. |
+| [workflows/wheel-linux-cuda.yml](workflows/wheel-linux-cuda.yml) | Manually validate Linux against a local CUDA model before enabling shared releases. |
 | [release-platforms.json](release-platforms.json) | Required platforms, runner labels, wheel tags, build workflow identities, and download-table descriptions. |
 | [../packaging/release.py](../packaging/release.py) | Artifact metadata, complete-set validation, provenance checks, upload retries and release notes. |
 
@@ -99,6 +100,22 @@ python packaging/release_runner.py RUN_ID --label cuda-13_2
 
 The example CUDA label/platform name is provisional until the CUDA owner
 confirms the toolkit and architecture. See the handoff before enabling it.
+
+Validate Linux independently with a local export on the runner host:
+
+```sh
+gh workflow run wheel-linux-cuda.yml --ref YOUR_BRANCH -f model-path=/absolute/path/to/cuda-export
+gh run list --workflow wheel-linux-cuda.yml --branch YOUR_BRANCH
+python packaging/release_runner.py RUN_ID --label cuda-13_2
+```
+
+This builds and attests the wheel, tests installation on Python 3.11/3.13, and
+runs live generation on Python 3.13. It uploads
+`muse-glimmer-linux-x86_64-cuda-13_2` without publishing. The build uses
+`linux_x86_64` and the build host's glibc/libstdc++; it makes no manylinux claim.
+Shared releases still require the acceptance checks in `CUDA_RELEASE.md` and a
+revision-pinned CUDA model catalog entry. They record manifests and checksums
+through the coordinator's existing artifact contract.
 
 ## Publish
 

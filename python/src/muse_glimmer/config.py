@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import platform
 import tomllib
 from pathlib import Path
 from typing import Literal
@@ -24,7 +25,10 @@ class Settings(BaseModel):
 
 
 def load_defaults() -> dict:
-    return tomllib.loads(resource_path("default_config.toml").read_text())
+    values = tomllib.loads(resource_path("default_config.toml").read_text())
+    if platform.system() == "Linux":
+        values["dflash"] = False
+    return values
 
 
 def load_settings(

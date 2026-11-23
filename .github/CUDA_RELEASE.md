@@ -1,8 +1,10 @@
 # CUDA release handoff
 
-The shared release process is prepared; **CUDA serving/build support is not
-implemented by this refactor**. Use [RELEASING.md](RELEASING.md) for operating the
-pipeline. Keep the top-level README limited to working user flows.
+CUDA 13.2 build and serving support and the Linux workflow are implemented.
+Shared CUDA publication remains disabled pending real-model acceptance checks
+and a revision-pinned CUDA model catalog entry. Use [RELEASING.md](RELEASING.md)
+for the manual Linux validation workflow and the shared release pipeline. Keep
+the top-level README limited to working user flows.
 
 ## What is already handled
 

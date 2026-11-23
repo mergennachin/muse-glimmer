@@ -27,7 +27,8 @@ prefix_cache_entries = 8
 # use fewer cache entries for long conversations.
 prefix_checkpoint_prompt_end = "every"
 
-# DFlash is enabled by default. Pulled variants select their matching mode.
+# DFlash defaults to enabled on macOS and disabled on Linux.
+# Pulled variants select their matching mode.
 # For a local solo export, disable it with --no-dflash or dflash = false.
 dflash = true
 

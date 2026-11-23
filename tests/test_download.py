@@ -16,6 +16,7 @@ from muse_glimmer.cli import main
 def hub(tmp_path, monkeypatch):
     monkeypatch.setattr(download.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(download.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(download.platform, "mac_ver", lambda: ("26.2", (), "arm64"))
     state = tmp_path / "data" / "default-model"
     monkeypatch.setattr(download, "default_model_file", lambda: state)
     snapshot = tmp_path / "cache" / "snapshots" / ("a" * 40)
@@ -148,7 +149,7 @@ def test_model_catalog_selects_variant_and_platform_location(
         hub,
         "apple-metal/model.pte",
         "cpu/model.pte",
-        "cpu/pos_embed.bin",
+        "cpu/aoti_cuda_blob.ptd",
         "vision-metal/model.pte",
         "vision-metal/pos_embed.bin",
     )
@@ -165,9 +166,10 @@ def test_model_catalog_selects_variant_and_platform_location(
         call(f"owner/{repo}", f"{directory}/model.pte", revision=hub.info.sha, force_download=False)
     ]
     if directory in {"cpu", "vision-metal"}:
+        companion = "aoti_cuda_blob.ptd" if directory == "cpu" else "pos_embed.bin"
         expected.append(
             call(
-                f"owner/{repo}", f"{directory}/pos_embed.bin",
+                f"owner/{repo}", f"{directory}/{companion}",
                 revision=hub.info.sha, force_download=False,
             )
         )
@@ -603,14 +605,15 @@ def cached_export(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("symlink", [False, True])
 @pytest.mark.parametrize("legacy", [False, True])
-def test_remove_deletes_export_but_preserves_other_variants_and_shared_blobs(cached_export, legacy, symlink, capsys):
+@pytest.mark.parametrize("companion", ["pos_embed.bin", "aoti_cuda_blob.ptd"])
+def test_remove_deletes_export_but_preserves_other_variants_and_shared_blobs(cached_export, legacy, symlink, companion, capsys):
     cache = cached_export
     model, model_blob = cache.add("vision/model.pte", "model", symlink=symlink)
-    positions, positions_blob = cache.add("vision/pos_embed.bin", "positions", symlink=symlink)
+    positions, positions_blob = cache.add(f"vision/{companion}", "positions", symlink=symlink)
     other, other_blob = cache.add("solo/model.pte", "other")
     readme, _ = cache.add("vision/README.md", "readme")
     if symlink:
-        shared, _ = cache.add("vision/pos_embed.bin", "positions", revision="b" * 40)
+        shared, _ = cache.add(f"vision/{companion}", "positions", revision="b" * 40)
     cache.state.write_text(str(model) if legacy else download.PulledModel(path=model).model_dump_json())
 
     assert main(["pull", "--remove"]) == 0

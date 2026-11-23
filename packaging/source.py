@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -26,6 +27,12 @@ MLX_SUBMODULES = [
     "third-party/json",
     "third-party/pocketfft",
 ]
+
+CUDA_SUBMODULES = [path for path in MLX_SUBMODULES if path != "backends/mlx/third-party/mlx"]
+
+
+def required_submodules(*, all_backends: bool = False) -> list[str]:
+    return CUDA_SUBMODULES if platform.system() == "Linux" and not all_backends else MLX_SUBMODULES
 
 
 def git(source: Path, *args: str) -> str:
@@ -76,14 +83,16 @@ def validate_checkout(source: Path, revision: str, *, editable: bool = False) ->
         raise RuntimeError(f"ExecuTorch submodules at {source} differ from their pinned revisions")
 
 
-def initialize_submodules(source: Path) -> None:
+def initialize_submodules(source: Path, *, all_backends: bool = False) -> None:
     if not (source / ".gitmodules").is_file():
         return
     configured = git(
         source, "config", "--file", ".gitmodules", "--get-regexp", r"submodule\..*\.path"
     )
     registered = {line.split(" ", 1)[1] for line in configured.splitlines()}
-    selected = [path for path in MLX_SUBMODULES if path in registered]
+    selected = [
+        path for path in required_submodules(all_backends=all_backends) if path in registered
+    ]
     if not selected:
         return
     for line in git(source, "submodule", "status", "--recursive", "--", *selected).splitlines():
@@ -107,7 +116,7 @@ def initialize_submodules(source: Path) -> None:
         )
 
 
-def source_checkout(*, editable: bool = False) -> Path:
+def source_checkout(*, editable: bool = False, all_backends: bool = False) -> Path:
     revision = source_metadata()["revision"]
     source = ROOT / SUBMODULE
     if (ROOT / ".git").exists() and not (source / ".git").exists():
@@ -119,7 +128,7 @@ def source_checkout(*, editable: bool = False) -> Path:
         git(ROOT, "submodule", "update", "--init", "--depth", "1", "--", SUBMODULE)
     validate_checkout(source, revision, editable=editable)
     if (source / ".git").exists():
-        initialize_submodules(source)
+        initialize_submodules(source, all_backends=all_backends)
         validate_checkout(source, revision, editable=editable)
     return source
 

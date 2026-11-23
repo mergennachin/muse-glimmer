@@ -1,6 +1,7 @@
 """Build and install real wheels in isolation; native compilation is not exercised."""
 
 import os
+import platform
 import runpy
 import shutil
 import subprocess
@@ -67,11 +68,14 @@ def test_installed_package_uses_its_own_shared_resources(tmp_path, mode):
         description = metadata.get_payload()
         assert "pip install --pre muse-glimmer" in description
         assert "pip install -e ." in description
-        assert wheel.name.endswith("-py3-none-macosx_26_0_arm64.whl")
-        tag = wheel.stem.rsplit("-", 1)[1]
-        assert tag in set(mac_platforms((26, 2), "arm64"))
-        assert tag in set(mac_platforms((27, 0), "arm64"))
-        assert tag not in set(mac_platforms((15, 0), "arm64"))
+        if platform.system() == "Linux":
+            assert wheel.name.endswith("-py3-none-linux_x86_64.whl")
+        else:
+            assert wheel.name.endswith("-py3-none-macosx_26_0_arm64.whl")
+            tag = wheel.stem.rsplit("-", 1)[1]
+            assert tag in set(mac_platforms((26, 2), "arm64"))
+            assert tag in set(mac_platforms((27, 0), "arm64"))
+            assert tag not in set(mac_platforms((15, 0), "arm64"))
         source_url = f"https://github.com/mergennachin/muse-glimmer/tree/v{metadata['Version']}"
         assert f"Source, {source_url}" in metadata.get_all("Project-URL")
         assert f"/blob/v{metadata['Version']}/default_config.toml" in description
@@ -118,6 +122,7 @@ for original in (Path(sys.argv[3]) / 'tokenizer').iterdir():
 @pytest.mark.parametrize("failure", ["import", "license"])
 def test_failed_staging_preserves_installed_runtime(tmp_path, monkeypatch, failure):
     root = Path(__file__).resolve().parents[1]
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
     stage = runpy.run_path(str(root / "packaging/stage.py"))["stage"]
     package = tmp_path / "package"
     for name in ("_vendor", "_native"):
