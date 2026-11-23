@@ -68,6 +68,9 @@ The wheel bundles the native worker and CUDA runtime dependencies. Serving needs
 an NVIDIA driver, but does not need PyTorch, a CUDA toolkit, or a source checkout.
 The initial wheel uses the `linux_x86_64` tag; its system-library requirements
 come from the build host. It is not a manylinux wheel.
+The current CUDA 13.2 export also requires `libstdc++` providing
+`GLIBCXX_3.4.30` (GCC 12+) at runtime; an older system library can prevent model
+loading even when the worker's startup check passes.
 
 For a local CUDA text-only solo export, keep its PTE and `aoti_cuda_blob.ptd` in
 the same directory, then start the server:

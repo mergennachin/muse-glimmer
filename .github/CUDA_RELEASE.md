@@ -6,6 +6,20 @@ and a revision-pinned CUDA model catalog entry. Use [RELEASING.md](RELEASING.md)
 for the manual Linux validation workflow and the shared release pipeline. Keep
 the top-level README limited to working user flows.
 
+## Local validation status
+
+The 17G text-solo CUDA export completed with static forward sizes `1,4` and a
+dynamic method through 512 tokens. The installed-wheel live smoke suite passed
+17 completed requests and intentional disconnect recovery with four concurrent
+requests, including streaming, tools, and prefix reuse. The existing reversed
+tool-result case was skipped for ExecuTorch issue 25299.
+
+This passed with a newer `libstdc++` explicitly supplied through
+`LD_LIBRARY_PATH`. The unmodified host runtime failed to load the AOTI library
+because it lacks `GLIBCXX_3.4.30`. Resolve and verify the compiler-runtime
+requirements in the portable wheel/model combination before publication; a
+successful worker `--help` check alone does not validate model loading.
+
 ## What is already handled
 
 - One version/tag and source commit for every platform.
