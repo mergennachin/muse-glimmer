@@ -6,10 +6,13 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
 
 import pytest
 from muse_glimmer import launch
+from muse_glimmer.cli import main
 from muse_glimmer.config import load_settings
 
 
@@ -59,10 +62,12 @@ def serve(model, settings, listener=None, *, api_dialect="openai", evict_idle_se
     print("Model HUD output", flush=True)
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
+            if self.path == "/crash":
+                os._exit(3)
             self.send_response(200 if self.path == "/health" else 404)
             self.end_headers()
             self.wfile.write(b'{"status":"ok"}')
-            if mode == "crash":
+            if mode == "crash" and os.environ["LAUNCH_CLIENT"] == "open-webui":
                 threading.Timer(0.5, lambda: os._exit(3)).start()
         def log_message(self, *args): pass
     server = HTTPServer(("127.0.0.1", 0), Handler, bind_and_activate=False)
@@ -108,6 +113,12 @@ with urllib.request.urlopen(url.removesuffix("/v1") + "/health", timeout=2) as r
 }))
 if os.environ["LAUNCH_TEST_MODE"] == "exit":
     raise SystemExit(7)
+if os.environ["LAUNCH_TEST_MODE"] == "crash":
+    # Crash the server after the client has recorded its PID, even on a busy host.
+    try:
+        urllib.request.urlopen(url.removesuffix("/v1") + "/crash", timeout=2)
+    except OSError:
+        pass
 while not (root / "release").exists(): time.sleep(0.02)
 """
     )
@@ -164,7 +175,7 @@ HTTPServer(("127.0.0.1", int(sys.argv[-1])), Handler).serve_forever()
     source = str(Path(launch.__file__).parents[1])
 
     @contextmanager
-    def run(mode="exit", host="127.0.0.1", port=None, client="muse", webui_port=None):
+    def run(mode="exit", host="127.0.0.1", port=None, client="muse", webui_port=None, target_args=None):
         if port is None:
             with socket.create_server(("127.0.0.1", 0)) as listener:
                 port = listener.getsockname()[1]
@@ -193,11 +204,9 @@ HTTPServer(("127.0.0.1", int(sys.argv[-1])), Handler).serve_forever()
             [
                 sys.executable,
                 "-c",
-                "from muse_glimmer import launch; launch.STARTUP_TIMEOUT=2; "
+                f"from muse_glimmer import launch; launch.STARTUP_TIMEOUT={2 if mode == 'timeout' else 8}; "
                 "from muse_glimmer.cli import main; raise SystemExit(main())",
                 "serve",
-                "--launch",
-                client,
                 "--model",
                 str(model),
                 "--config",
@@ -206,6 +215,7 @@ HTTPServer(("127.0.0.1", int(sys.argv[-1])), Handler).serve_forever()
                 host,
                 "--port",
                 str(port),
+                *(target_args if target_args is not None else ["--launch", client]),
             ],
             cwd=tmp_path,
             env=env,
@@ -246,6 +256,61 @@ HTTPServer(("127.0.0.1", int(sys.argv[-1])), Handler).serve_forever()
                 assert not alive(json.loads(state.read_text())["pid"])
 
     return run
+
+
+def test_script_runs_on_configured_endpoint_and_returns_its_exit_code(run_launch, tmp_path):
+    script = tmp_path / "my prototype.py"
+    script.write_text(
+        "import sys, urllib.request\n"
+        "from muse_glimmer import Glimmer\n"
+        "url = Glimmer().base_url\n"
+        "assert urllib.request.urlopen(url.removesuffix('/v1') + '/health').status == 200\n"
+        "assert sys.argv[1:] == ['--port', 'two words']\n"
+        "print(url)\n"
+        "sys.exit(13)\n"
+    )
+    with run_launch(target_args=[script.name, "--", "--port", "two words"]) as (proc, url):
+        out, err = proc.communicate(timeout=10)
+        assert proc.returncode == 13, err
+        assert out.strip() == url
+        assert "Server ready. Launching" in err
+
+
+def test_positional_opencode_launch(run_launch):
+    with run_launch(client="opencode", target_args=["opencode"]) as (proc, _):
+        _, err = proc.communicate(timeout=10)
+        assert proc.returncode == 7, err
+
+
+@pytest.mark.parametrize("model_id,health,expected", [
+    ("muse-glimmer-30B", 200, 17), ("other", 200, 1), ("muse-glimmer-30B", 503, 1),
+])
+def test_attach_script_preserves_existing_service(tmp_path, model_id, health, expected):
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = {"data": [{"id": model_id, "owned_by": "executorch"}]}
+            self.send_response(health if self.path == "/health" else 200)
+            self.end_headers()
+            self.wfile.write(json.dumps(body).encode())
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+        thread = Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            port = str(server.server_port)
+            marker = tmp_path / "ran"
+            script = tmp_path / "script.py"
+            script.write_text(
+                f"from pathlib import Path\nPath({str(marker)!r}).touch()\nraise SystemExit(17)\n"
+            )
+            args = ["serve", "--port", port, "--model", "/unused.pte", str(script)]
+            assert main(args) == expected
+            assert marker.exists() == (expected == 17)
+            # A second invocation finds the same listener even after a script failure.
+            assert main(args) == expected
+        finally:
+            server.shutdown()
+            thread.join()
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "0.0.0.0"])

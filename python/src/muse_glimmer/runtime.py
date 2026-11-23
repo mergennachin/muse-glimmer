@@ -10,9 +10,9 @@ from pathlib import Path
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .config import Settings
+from .constants import MODEL_ID
 from .resources import resource_path
 
-MODEL_ID = "muse-glimmer-30B"
 MINIMUM_MACOS = (26, 2)
 
 
@@ -157,13 +157,18 @@ def serve(
             raise ValueError("Native runtime missing. Reinstall muse-glimmer.")
         import uvicorn
 
+        from ._vendor.llm_server.hud.metrics import Metrics
         from ._vendor.muse import serve_batching as serving
+        from .timings import RequestMetrics, TimingHeaders
 
         options = [*server_options(model, settings), "--api-dialect", api_dialect]
         if evict_idle_sessions:
             options.append("--evict-idle-sessions")
         args = serving._parse_args(options)
         app = serving.build_app_from_args(args)
+        hud = app.state.telemetry
+        app.state.telemetry = RequestMetrics(hud if hud is not None else Metrics(), hud is not None)
+        app.add_middleware(TimingHeaders)
         if queue_requests:
             app = QueuedRequests(app, settings.concurrency)
 

@@ -49,6 +49,29 @@ pip install -e .
 
 </details>
 
+## Python client
+
+`generate` returns text. `chat` takes a message history and returns an OpenAI-style completion.
+
+```python
+from muse_glimmer import Glimmer
+
+g = Glimmer(timings=True)
+prompt = "Name a coffee shop on the moon. Reply with just the name."
+name = g.generate(prompt)
+print(name)
+
+g2 = Glimmer()
+messages = [
+    {"role": "user", "content": prompt},
+    {"role": "assistant", "content": name},
+    {"role": "user", "content": "Give that shop a one-line tagline."},
+]
+print(g2.chat(messages)["choices"][0]["message"]["content"])
+```
+
+Save as `foo.py` and run `muse-glimmer serve foo.py`. See `examples/generate.py` for options.
+
 ## Coding agents
 
 Install [Muse](https://dev.meta.ai/products/muse-code), [Pi](https://github.com/earendil-works/pi),
@@ -56,7 +79,7 @@ Install [Muse](https://dev.meta.ai/products/muse-code), [Pi](https://github.com/
 or [OpenCode](https://opencode.ai), then launch from your project directory:
 
 ```sh
-muse-glimmer serve --launch muse
+muse-glimmer serve muse
 ```
 
 Replace `muse` with `pi`, `omp`, `hermes`, or `opencode` as needed.

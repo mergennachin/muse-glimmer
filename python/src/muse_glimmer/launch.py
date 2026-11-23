@@ -87,9 +87,167 @@ def launch_agent(model: Path, settings: Settings, name: str) -> int:
         raise ValueError(f"{label} is not installed. {install}")
     pi_extension = _register_pi_extension() if name == "pi" else None
 
+    origin = _origin(settings)
+    env = dict(os.environ)
+    if name == "muse":
+        env.update(
+            OPENROUTER_API_KEY="muse-glimmer", OPENROUTER_BASE_URL=f"{origin}/v1"
+        )
+        command = [
+            binary,
+            "--provider",
+            "openrouter",
+            "--model",
+            MODEL_ID,
+            "--base-url",
+            f"{origin}/v1",
+        ]
+    elif name == "hermes":
+        # Launch-only overrides preserve Hermes's saved provider. Its
+        # classic CLI supports custom endpoint flags; the TUI does not.
+        # Hermes's first-run check also requires credentials in the environment.
+        env.update(OPENAI_API_KEY="muse-glimmer", OPENAI_BASE_URL=f"{origin}/v1")
+        command = [
+            binary,
+            "chat",
+            "--cli",
+            "--provider",
+            "custom",
+            "--model",
+            MODEL_ID,
+            "--base-url",
+            f"{origin}/v1",
+            "--api-key",
+            "muse-glimmer",
+            "--reasoning",
+            "low",
+        ]
+    elif name == "opencode":
+        local_model = f"muse-glimmer/{MODEL_ID}#low"
+        env["OPENCODE_CONFIG_CONTENT"] = json.dumps(
+            {
+                "model": local_model,
+                "providers": {
+                    "muse-glimmer": {
+                        "name": "Muse Glimmer",
+                        "package": "@opencode/ai/providers/openai-compatible",
+                        "settings": {"baseURL": f"{origin}/v1", "apiKey": "muse-glimmer"},
+                        "models": {
+                            MODEL_ID: {
+                                "name": "Muse Glimmer 30B",
+                                "limit": {"context": settings.context, "output": min(32768, settings.context // 4)},
+                                "capabilities": {
+                                    "input": ["text"], "output": ["text"], "tools": True,
+                                    "reasoning": {"supported": True, "effort": ["low", "medium", "high"]},
+                                },
+                                "compatibility": {"maxTokensField": "max_tokens", "supportsPromptCacheKey": False},
+                                "settings": {"reasoningEffort": "low"},
+                            }
+                        },
+                    }
+                },
+                "agents": {"title": {"model": local_model}},
+                "plugins": [Path(__file__).with_name("opencode").resolve().as_uri()],
+            }
+        )
+        # OpenCode's shared background service does not inherit this environment.
+        command = [binary, "--standalone"]
+    else:
+        env[f"MUSE_GLIMMER_{name.upper()}_MODEL"] = json.dumps(
+            {
+                "baseUrl": f"{origin}/v1",
+                "id": MODEL_ID,
+                "contextWindow": settings.context,
+            }
+        )
+        if name == "pi":
+            command = [
+                binary,
+                "--extension",
+                str(pi_extension),
+                "--provider",
+                "muse-glimmer",
+                "--model",
+                MODEL_ID,
+            ]
+        else:
+            # OMP inherits extensions into subagents. Keep its model roles
+            # and auxiliary inference on the local provider for this run.
+            env["OMP_SKIP_SETUP"] = "1"
+            local_model = f"muse-glimmer/{MODEL_ID}"
+            command = [
+                binary,
+                "--extension",
+                str(Path(__file__).with_name("omp.mjs").resolve()),
+                "--model",
+                local_model,
+                "--smol",
+                local_model,
+                "--slow",
+                local_model,
+                "--plan",
+                local_model,
+                "--offline",
+            ]
+    return _launch(model, settings, name, label, origin, command, env)
+
+
+def _origin(settings: Settings) -> str:
     host = {"0.0.0.0": "127.0.0.1", "::": "::1"}.get(settings.host, settings.host)
     host = f"[{host}]" if ":" in host else host
-    origin = f"http://{host}:{settings.port}"
+    return f"http://{host}:{settings.port}"
+
+
+def reusable_server(settings: Settings) -> bool:
+    origin = _origin(settings)
+    with httpx.Client(base_url=origin, trust_env=False, timeout=2) as client:
+        try:
+            models = client.get("/v1/models")
+        except httpx.ConnectError:
+            return False
+        except httpx.RequestError as error:
+            raise ValueError(f"Could not identify the server at {origin}: {error}") from error
+        try:
+            data = models.json()["data"] if models.is_success else []
+            matches = isinstance(data, list) and any(
+                isinstance(entry, dict) and entry.get("id") == MODEL_ID
+                and entry.get("owned_by") == "executorch" for entry in data
+            )
+        except (ValueError, TypeError, KeyError):
+            matches = False
+        if not matches:
+            raise ValueError(f"{origin} is occupied by a different service. Choose another --port.")
+        try:
+            if client.get("/health").status_code == 200:
+                return True
+        except httpx.RequestError as error:
+            raise ValueError(f"Glimmer at {origin} failed its health check: {error}") from error
+        raise ValueError(f"Glimmer at {origin} is not ready.")
+
+
+def launch_script(model: Path | None, settings: Settings, script: Path, args: list[str]) -> int:
+    origin = _origin(settings)
+    env = dict(os.environ, MUSE_GLIMMER_BASE_URL=f"{origin}/v1")
+    command = [sys.executable, str(script.absolute()), *args]
+    if model is None:
+        print(f"Reusing Glimmer at {origin}. Launching {script}", file=sys.stderr, flush=True)
+        old_term = signal.signal(signal.SIGTERM, _terminate)
+        try:
+            with subprocess.Popen(command, env=env) as child:
+                try:
+                    result = child.wait()
+                    return result if result >= 0 else 128 - result
+                finally:
+                    _stop_agent(child)
+        finally:
+            signal.signal(signal.SIGTERM, old_term)
+    return _launch(model, settings, "script", str(script), origin, command, env)
+
+
+def _launch(
+    model: Path, settings: Settings, name: str, label: str, origin: str,
+    command: list[str], env: dict[str, str],
+) -> int:
     # Bind before starting the child so an existing server can never be mistaken for ours.
     with bind_server(settings.host, settings.port) as listener:
         with tempfile.TemporaryFile(mode="w+b") as log:
@@ -129,107 +287,6 @@ def launch_agent(model: Path, settings: Settings, name: str) -> int:
                             raise ValueError("Timed out waiting for the server to start.")
                         time.sleep(0.1)
 
-                env = dict(os.environ)
-                if name == "muse":
-                    env.update(
-                        OPENROUTER_API_KEY="muse-glimmer", OPENROUTER_BASE_URL=f"{origin}/v1"
-                    )
-                    command = [
-                        binary,
-                        "--provider",
-                        "openrouter",
-                        "--model",
-                        MODEL_ID,
-                        "--base-url",
-                        f"{origin}/v1",
-                    ]
-                elif name == "hermes":
-                    # Launch-only overrides preserve Hermes's saved provider. Its
-                    # classic CLI supports custom endpoint flags; the TUI does not.
-                    # Hermes's first-run check also requires credentials in the environment.
-                    env.update(OPENAI_API_KEY="muse-glimmer", OPENAI_BASE_URL=f"{origin}/v1")
-                    command = [
-                        binary,
-                        "chat",
-                        "--cli",
-                        "--provider",
-                        "custom",
-                        "--model",
-                        MODEL_ID,
-                        "--base-url",
-                        f"{origin}/v1",
-                        "--api-key",
-                        "muse-glimmer",
-                        "--reasoning",
-                        "low",
-                    ]
-                elif name == "opencode":
-                    local_model = f"muse-glimmer/{MODEL_ID}#low"
-                    env["OPENCODE_CONFIG_CONTENT"] = json.dumps(
-                        {
-                            "model": local_model,
-                            "providers": {
-                                "muse-glimmer": {
-                                    "name": "Muse Glimmer",
-                                    "package": "@opencode/ai/providers/openai-compatible",
-                                    "settings": {"baseURL": f"{origin}/v1", "apiKey": "muse-glimmer"},
-                                    "models": {
-                                        MODEL_ID: {
-                                            "name": "Muse Glimmer 30B",
-                                            "limit": {"context": settings.context, "output": min(32768, settings.context // 4)},
-                                            "capabilities": {
-                                                "input": ["text"], "output": ["text"], "tools": True,
-                                                "reasoning": {"supported": True, "effort": ["low", "medium", "high"]},
-                                            },
-                                            "compatibility": {"maxTokensField": "max_tokens", "supportsPromptCacheKey": False},
-                                            "settings": {"reasoningEffort": "low"},
-                                        }
-                                    },
-                                }
-                            },
-                            "agents": {"title": {"model": local_model}},
-                            "plugins": [Path(__file__).with_name("opencode").resolve().as_uri()],
-                        }
-                    )
-                    # OpenCode's shared background service does not inherit this environment.
-                    command = [binary, "--standalone"]
-                else:
-                    env[f"MUSE_GLIMMER_{name.upper()}_MODEL"] = json.dumps(
-                        {
-                            "baseUrl": f"{origin}/v1",
-                            "id": MODEL_ID,
-                            "contextWindow": settings.context,
-                        }
-                    )
-                    if name == "pi":
-                        command = [
-                            binary,
-                            "--extension",
-                            str(pi_extension),
-                            "--provider",
-                            "muse-glimmer",
-                            "--model",
-                            MODEL_ID,
-                        ]
-                    else:
-                        # OMP inherits extensions into subagents. Keep its model roles
-                        # and auxiliary inference on the local provider for this run.
-                        env["OMP_SKIP_SETUP"] = "1"
-                        local_model = f"muse-glimmer/{MODEL_ID}"
-                        command = [
-                            binary,
-                            "--extension",
-                            str(Path(__file__).with_name("omp.mjs").resolve()),
-                            "--model",
-                            local_model,
-                            "--smol",
-                            local_model,
-                            "--slow",
-                            local_model,
-                            "--plan",
-                            local_model,
-                            "--offline",
-                        ]
                 print(f"Server ready. Launching {label} using {origin}/v1", file=sys.stderr, flush=True)
                 # The agent owns Ctrl+C; keep its server alive for cancelled turns.
                 signal.signal(signal.SIGINT, lambda *_: None)

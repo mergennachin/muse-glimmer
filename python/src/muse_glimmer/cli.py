@@ -7,6 +7,8 @@ from pathlib import Path
 from . import __version__
 from .config import Settings, load_defaults, load_settings
 
+CLIENTS = ("muse", "pi", "omp", "hermes", "opencode", "open-webui")
+
 
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
@@ -67,10 +69,13 @@ Run muse-glimmer pull --help or muse-glimmer serve --help for options.""",
         "serve", help="Start the local server",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Serve the selected model, or a local model supplied with --model.\n"
-        "Stop with Ctrl+C. With a coding agent, exiting the agent stops its server.",
+        "Scripts reuse a running Glimmer at the configured address. A server started for a script\n"
+        "or client stops when it exits. Stop a standalone server with Ctrl+C.",
         epilog="""Examples:
   muse-glimmer serve
-  muse-glimmer serve --launch muse
+  muse-glimmer serve opencode
+  muse-glimmer serve foo.py
+  muse-glimmer serve --port 8001 foo.py -- --count 3
   muse-glimmer serve --model /path/to/model.pte --no-dflash
   muse-glimmer serve --config ./config.toml --port 8001
 
@@ -80,9 +85,11 @@ by the client on each request.""",
     )
     command.add_argument("--config", type=Path, help="TOML overrides; read only when explicitly supplied")
     command.add_argument("--model", help="Local .pte file or directory containing one .pte; otherwise use the selected model")
-    command.add_argument(
+    targets = command.add_mutually_exclusive_group()
+    targets.add_argument("target", nargs="?", help="Client name or path to a Python script")
+    targets.add_argument(
         "--launch",
-        choices=["muse", "pi", "omp", "hermes", "opencode", "open-webui"],
+        choices=CLIENTS,
         help="Launch a client using the local server",
     )
     command.add_argument("--host", help=f"Listening address (default: {default_value('host')})")
@@ -105,6 +112,12 @@ by the client on each request.""",
 
 def main(argv: list[str] | None = None) -> int:
     root = parser()
+    argv = sys.argv[1:] if argv is None else argv
+    script_args = []
+    if argv[:1] == ["serve"] and "--" in argv:
+        separator = argv.index("--")
+        script_args = argv[separator + 1:]
+        argv = argv[:separator]
     args = root.parse_args(argv)
     if args.command is None:
         root.print_help()
@@ -116,6 +129,15 @@ def main(argv: list[str] | None = None) -> int:
             root.error("--variant requires a model version")
         if not (args.list or args.remove) and args.model_version is None:
             root.error("a model version is required; use pull --list to see available models")
+    script = None
+    if args.command == "serve":
+        target = args.target or args.launch
+        if target and target not in CLIENTS:
+            script = Path(target)
+            if script.suffix != ".py" or not script.is_file():
+                root.error(f"Expected a client name or an existing .py script, got {target!r}")
+        if script_args and script is None:
+            root.error("Arguments after -- require a Python script target")
     try:
         if args.command == "pull":
             from .download import list_models, pull, remove_model
@@ -138,9 +160,14 @@ def main(argv: list[str] | None = None) -> int:
 
         from .runtime import check_platform, resolve_model, serve
 
-        check_platform()
         values = {key: value for key, value in vars(args).items() if key in Settings.model_fields}
         settings = load_settings(values, args.config)
+        if script is not None:
+            from .launch import launch_script, reusable_server
+
+            if reusable_server(settings):
+                return launch_script(None, settings, script, script_args)
+        check_platform()
         if settings.model:
             model = Path(settings.model)
         else:
@@ -161,14 +188,16 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
             flush=True,
         )
-        if args.launch in {"muse", "pi", "omp", "hermes", "opencode"}:
-            from .launch import launch_agent
-
-            return launch_agent(model, settings, args.launch)
-        if args.launch == "open-webui":
+        if script is not None:
+            return launch_script(model, settings, script, script_args)
+        if target == "open-webui":
             from .webui import launch_open_webui
 
             return launch_open_webui(model, settings)
+        if target:
+            from .launch import launch_agent
+
+            return launch_agent(model, settings, target)
         serve(model, settings)
         return 0
     except KeyboardInterrupt:
