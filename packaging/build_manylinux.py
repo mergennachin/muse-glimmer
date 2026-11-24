@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import platform
 import re
@@ -46,10 +48,52 @@ def prepare_stb(recipe: Path, dest: Path) -> None:
         shutil.copyfile(path, dest / path.name)
 
 
-def source_archive(wheelhouse: Path) -> Path:
+def package_source_id(root: Path, wheelhouse: Path) -> str:
+    """Identify Muse sources, including working-tree edits used by setuptools."""
+    digest = hashlib.sha256()
+    if (root / ".git").exists():
+        digest.update(subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root))
+        listing = subprocess.check_output(
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--",
+             ".", ":(exclude)third-party/executorch"], cwd=root,
+        )
+        files = {root / os.fsdecode(name) for name in listing.split(b"\0") if name}
+    else:
+        # An extracted sdist carries setuptools' manifest, including package data.
+        manifest = root / "python/src/muse_glimmer.egg-info/SOURCES.txt"
+        files = {root / name for name in manifest.read_text().splitlines()}
+        # setuptools discovers new modules too when rebuilding from a modified sdist.
+        for name in ("python/src/muse_glimmer", "build_backend", "packaging", "tokenizer", "tests"):
+            files.update((root / name).rglob("*"))
+    for file in sorted(files):
+        relative = file.relative_to(root)
+        if file.is_relative_to(wheelhouse):
+            cached = file.relative_to(wheelhouse)
+            if file.suffix == ".whl" or (cached.parts and re.fullmatch("[0-9a-f]{40}", cached.parts[0])):
+                continue
+        if relative.parts[0] == "third-party" or not file.is_file():
+            continue
+        if any(p.endswith(".egg-info") or p in ("__pycache__", "_native", "_vendor") for p in relative.parts):
+            continue
+        digest.update(os.fsencode(relative) + b"\0")
+        digest.update(b"x" if file.stat().st_mode & 0o111 else b"-")
+        link = os.readlink(file) if file.is_symlink() else ""
+        digest.update(os.fsencode(link) + b"\0")
+        with file.open("rb") as stream:
+            digest.update(hashlib.file_digest(stream, "sha256").digest())
+    return digest.hexdigest()
+
+
+def archive_record(archive: Path, source_id: str) -> dict[str, str]:
+    with archive.open("rb") as stream:
+        checksum = hashlib.file_digest(stream, "sha256").hexdigest()
+    return {"muse_glimmer_source_id": source_id, "archive_sha256": checksum}
+
+
+def source_archive(wheelhouse: Path, source_id: str) -> Path:
     version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
     revision = runpy.run_path(str(ROOT / "packaging/source.py"))["source_metadata"]()["revision"]
-    return wheelhouse / revision / f"muse_glimmer-{version}.tar.gz"
+    return wheelhouse / revision / source_id / f"muse_glimmer-{version}.tar.gz"
 
 
 def prepare(wheelhouse: Path) -> None:
@@ -66,8 +110,9 @@ def prepare(wheelhouse: Path) -> None:
         command.extend(["--platform", f"{legacy}_x86_64"])
     subprocess.run([*command, "build>=1.2,<2", *requirements], check=True)
 
-    archive = source_archive(wheelhouse)
-    archive.parent.mkdir(exist_ok=True)
+    source_id = package_source_id(ROOT, wheelhouse)
+    archive = source_archive(wheelhouse, source_id)
+    archive.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=archive.parent) as tmp:
         stage = Path(tmp)
         source = runpy.run_path(str(ROOT / "packaging/source.py"))["source_checkout"]()
@@ -79,15 +124,24 @@ def prepare(wheelhouse: Path) -> None:
                         "setuptools>=77", "wheel>=0.45"], check=True)
         subprocess.run([python, "setup.py", "sdist", "--cuda-stb-dir", str(stage / "stb"),
                         "--dist-dir", str(stage)], cwd=ROOT, check=True)
+        if source_archive(wheelhouse, package_source_id(ROOT, wheelhouse)) != archive:
+            raise RuntimeError("Muse-Glimmer sources changed during preparation. Rerun --prepare-only.")
+        record = stage / "source.json"
+        record.write_text(json.dumps(archive_record(stage / archive.name, source_id)) + "\n")
         (stage / archive.name).replace(archive)
+        record.replace(archive.parent / "source.json")
 
 
 def build(image: str, wheelhouse: Path, output: Path) -> None:
     if (platform.system(), platform.machine()) != ("Linux", "x86_64"):
         raise RuntimeError("The manylinux CUDA builder requires Linux x86_64.")
-    archive = source_archive(wheelhouse)
-    if not archive.is_file() or not list(wheelhouse.glob("torch-*.whl")):
-        raise RuntimeError("Run --prepare-only to stage the build wheels, pinned ExecuTorch sources and STB.")
+    source_id = package_source_id(ROOT, wheelhouse)
+    archive = source_archive(wheelhouse, source_id)
+    record = archive.parent / "source.json"
+    if not archive.is_file() or not record.is_file() or not list(wheelhouse.glob("torch-*.whl")):
+        raise RuntimeError("Run --prepare-only for this Muse-Glimmer checkout to stage its sources and dependencies.")
+    if json.loads(record.read_text()) != archive_record(archive, source_id):
+        raise RuntimeError("Prepared archive differs from this checkout or its checksum. Rerun --prepare-only.")
     subprocess.run(["podman", "image", "exists", image], check=True)
     output.mkdir(parents=True, exist_ok=True)
     if list(output.glob("*.whl")):

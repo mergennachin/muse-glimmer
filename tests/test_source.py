@@ -244,3 +244,48 @@ def test_only_required_dependencies_are_initialized(acquisition, monkeypatch, tm
     module.copy_sources(source, snapshot, editable=True)
     assert (snapshot / "deps/needed/file.txt").read_text() == "local changes"
     assert (snapshot / "deps/needed/new.cpp").read_text() == "// new source\n"
+
+
+def test_offline_archive_rejects_changed_muse_sources_and_damaged_bytes(acquisition, tmp_path, monkeypatch):
+    module, _, _ = acquisition
+    root = module.ROOT
+    package = Path(__file__).resolve().parents[1]
+    (root / "packaging").mkdir()
+    shutil.copy2(package / "packaging/source.py", root / "packaging/source.py")
+    (root / "pyproject.toml").write_text('[project]\nversion = "1.0"\n')
+    path = root / "setup.py"
+    path.write_text("# source at preparation\n")
+    commit(root)
+    builder = runpy.run_path(str(package / "packaging/build_manylinux.py"))
+    build = builder["build"]
+    monkeypatch.setitem(build.__globals__, "ROOT", root)
+    monkeypatch.setattr(module.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(module.platform, "machine", lambda: "x86_64")
+    wheelhouse = root / "local-wheelhouse"
+    source_id = builder["package_source_id"](root, wheelhouse)
+    archive = builder["source_archive"](wheelhouse, source_id)
+    archive.parent.mkdir(parents=True)
+    archive.write_bytes(b"prepared source distribution")
+    (archive.parent / "source.json").write_text(json.dumps(builder["archive_record"](archive, source_id)))
+    (wheelhouse / "torch-fixture.whl").touch()
+    output = tmp_path / "output"
+
+    path.write_text("# changed without a version or ExecuTorch pin bump\n")
+    with pytest.raises(RuntimeError, match="prepare-only"):
+        build("unused", wheelhouse, output)
+    path.write_text("# source at preparation\n")
+    assert builder["package_source_id"](root, wheelhouse) == source_id
+    extra = root / "packaging/new_module.py"
+    extra.write_text("# new build input\n")
+    with pytest.raises(RuntimeError, match="prepare-only"):
+        build("unused", wheelhouse, output)
+    extra.unlink()
+    archive.write_bytes(b"substituted source archive")
+    with pytest.raises(RuntimeError, match="checksum"):
+        build("unused", wheelhouse, output)
+
+    # A new commit with the same tree still identifies a different release.
+    git(root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+        "commit", "-qm", "next release candidate", "--allow-empty")
+    with pytest.raises(RuntimeError, match="prepare-only"):
+        build("unused", wheelhouse, output)

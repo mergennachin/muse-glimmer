@@ -4,6 +4,11 @@ name: Build and release wheels
 
 on:
   workflow_dispatch:
+    inputs:
+      cuda-model-path:
+        description: Absolute CUDA export path on the Linux test runner (defaults to repository variable MUSE_GLIMMER_CUDA_MODEL_PATH)
+        type: string
+        required: false
   push:
     tags: ["v*"]
 
@@ -46,6 +51,8 @@ jobs:
     needs: plan
     if: contains(fromJSON(needs.plan.outputs.platforms), 'linux-x86_64-cuda-13_2')
     uses: ./.github/workflows/linux_wheel.yml
+    with:
+      model-path: ${{ inputs.cuda-model-path || vars.MUSE_GLIMMER_CUDA_MODEL_PATH }}
     permissions:
       contents: read
       id-token: write

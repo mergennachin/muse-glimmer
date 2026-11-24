@@ -103,8 +103,11 @@ def test_runner_cleanup(tmp_path, monkeypatch, runner_module, outcome, host, arc
 
     children = []
     popen = subprocess.Popen
+    monkeypatch.setenv("MUSE_GLIMMER_CXX_RUNTIME_DIR", str(tmp_path / "gcc-runtime"))
 
     def start(*args, **kwargs):
+        if args[0] == ["./run.sh"] and host == "Linux":
+            assert kwargs["env"]["MUSE_GLIMMER_CXX_RUNTIME_DIR"] == str(tmp_path / "gcc-runtime")
         child = popen(*args, **kwargs)
         children.append(child)
         return child

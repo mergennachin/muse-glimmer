@@ -7,7 +7,7 @@ on:
         default: true
       model-path:
         type: string
-        default: ''
+        required: true
 permissions:
   contents: read
 env:
@@ -38,7 +38,13 @@ jobs:
           activate-environment: true
           enable-cache: false
       - name: Build CUDA 13.2 wheel
+        env:
+          MUSE_GLIMMER_MODEL_PATH: ${{ inputs.model-path }}
         run: |
+          if [[ "$MUSE_GLIMMER_MODEL_PATH" != /* ]]; then
+            echo '::error::Supply an absolute CUDA model path or set the MUSE_GLIMMER_CUDA_MODEL_PATH repository variable for tagged releases.'
+            exit 1
+          fi
           export PATH="$CUDA_HOME/bin:$PATH"
           nvcc --version
           uv pip install build
@@ -98,13 +104,7 @@ jobs:
         run: python -m pytest tests -q --junitxml=reports/pytest.xml
       - name: Smoke test the installed wheel with a live model
         if: matrix.python == '3.13'
-        run: |
-          if [ -n "$MUSE_GLIMMER_MODEL_PATH" ]; then
-            python packaging/smoke_wheel.py --model "$MUSE_GLIMMER_MODEL_PATH"
-          else
-            echo 'A local CUDA export is required for the Linux live smoke test.' >&2
-            exit 1
-          fi
+        run: python packaging/smoke_wheel.py --model "$MUSE_GLIMMER_MODEL_PATH"
         env:
           MUSE_GLIMMER_MODEL_PATH: ${{ inputs.model-path }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

@@ -109,6 +109,11 @@ gh run list --workflow wheel-linux-cuda.yml --branch YOUR_BRANCH
 python packaging/release_runner.py RUN_ID --label cuda-13_2
 ```
 
+For coordinated releases, set the repository Actions variable
+`MUSE_GLIMMER_CUDA_MODEL_PATH` to the absolute path of the CUDA export on the
+Linux test runner. Tagged builds use that path. To override it on a manual run
+of `wheel.yml`, pass `-f cuda-model-path=/absolute/path/to/cuda-export`.
+
 This builds and attests the wheel, tests installation on Python 3.11/3.13, and
 runs live generation on Python 3.13. It uploads
 `muse-glimmer-linux-x86_64-cuda-13_2` without publishing. The build uses

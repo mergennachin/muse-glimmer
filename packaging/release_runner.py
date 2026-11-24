@@ -173,6 +173,9 @@ def run(run_id: int, labels: list[str] | None = None) -> int:
                 )
                 if key in os.environ
             }
+            runtime_dir = os.environ.get("MUSE_GLIMMER_CXX_RUNTIME_DIR")
+            if host[0] == "Linux" and runtime_dir:
+                env["MUSE_GLIMMER_CXX_RUNTIME_DIR"] = str(Path(runtime_dir).expanduser().resolve())
             env.update(
                 PATH=os.pathsep.join(
                     dict.fromkeys(

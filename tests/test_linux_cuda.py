@@ -14,6 +14,29 @@ from muse_glimmer.config import load_settings
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_cuda_compiler_rejects_mixed_toolkits_and_accepts_aliases(tmp_path, monkeypatch):
+    select = runpy.run_path(str(ROOT / "packaging/build_native.py"))["cuda_compiler"]
+    toolkit = tmp_path / "cuda-13.2"
+    nvcc = toolkit / "bin/nvcc"
+    nvcc.parent.mkdir(parents=True)
+    nvcc.write_text("#!/bin/sh\necho 'Cuda compilation tools, release 13.2, V13.2.86'\n")
+    nvcc.chmod(0o755)
+    other = tmp_path / "cuda-12.8/bin/nvcc"
+    other.parent.mkdir(parents=True)
+    other.touch(mode=0o755)
+    monkeypatch.setenv("CUDA_HOME", str(toolkit))
+    monkeypatch.delenv("CUDA_PATH", raising=False)
+    monkeypatch.setenv("CUDACXX", str(other))
+    with pytest.raises(RuntimeError, match="conflicts"):
+        select()
+    alias = tmp_path / "current-nvcc"
+    alias.symlink_to(nvcc)
+    monkeypatch.setenv("CUDACXX", f"{alias} --allow-unsupported-compiler")
+    assert select()[:2] == (nvcc, "--allow-unsupported-compiler")
+    monkeypatch.delenv("CUDA_HOME")
+    assert select()[:2] == (nvcc, "--allow-unsupported-compiler")
+
+
 def test_linux_solo_loads_the_cuda_data_file(tmp_path, monkeypatch):
     monkeypatch.setattr(platform, "system", lambda: "Linux")
     model = tmp_path / "solo.pte"

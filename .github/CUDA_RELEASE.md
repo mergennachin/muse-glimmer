@@ -56,7 +56,8 @@ x86-64 host. It downloads the CPython 3.11 build wheels, initializes the pinned
 ExecuTorch CUDA submodules, and packages their sources with the STB image and
 resize headers and license from ExecuTorch's CMake pin. To supply a trusted
 local copy of STB, set `MUSE_GLIMMER_STB_INCLUDE_DIR` during preparation.
-Repeat preparation after changing the sources.
+Preparation records the Muse-Glimmer source fingerprint and archive checksum.
+Repeat preparation after switching commits or editing the package sources.
 
 With the manylinux image preloaded and CUDA 13.2 installed, run
 `python packaging/build_manylinux.py`. The container builds from the prepared
@@ -156,6 +157,8 @@ Use a review branch containing all CUDA changes. Dispatch **one** `wheel.yml`
 run on that branch. Join its run ID from both machines; each downloads its own
 runner archive and receives only matching jobs. The helper preserves CUDA_HOME,
 CUDA_PATH and CUDACXX and adds discoverable `nvcc`/`nvidia-smi` directories to PATH.
+On Linux it also forwards `MUSE_GLIMMER_CXX_RUNTIME_DIR` when the build needs
+a GNU C++ runtime outside the compiler's default library directory.
 Any additional build setup belongs explicitly in `linux_wheel.yml`.
 
 The Mac must remain available for coordination and its own tests. The Linux

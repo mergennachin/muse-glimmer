@@ -22,6 +22,40 @@ def run(argv: list[str], cwd: Path) -> None:
     subprocess.run(argv, cwd=cwd, check=True)
 
 
+def cuda_compiler() -> tuple[Path, str, str]:
+    """Choose one nvcc for both CMake's CUDA language and Torch's FindCUDA."""
+    home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH")
+    alternate = os.environ.get("CUDA_PATH")
+    if home and alternate and Path(home).expanduser().resolve() != Path(alternate).expanduser().resolve():
+        raise RuntimeError(f"CUDA_HOME={home} conflicts with CUDA_PATH={alternate}")
+    setting = os.environ.get("CUDACXX")
+    args = shlex.split(setting) if setting else []
+    if setting and Path(setting).is_file():
+        args = [setting]  # An unquoted executable path can contain spaces.
+    if setting and not args:
+        raise RuntimeError("CUDACXX must name a CUDA compiler")
+    if home:
+        home_nvcc = (Path(home).expanduser() / "bin/nvcc").resolve()
+        if args:
+            explicit = shutil.which(args[0])
+            if explicit is None or Path(explicit).resolve() != home_nvcc:
+                raise RuntimeError(f"CUDACXX={setting} conflicts with CUDA toolkit {home}")
+        compiler = home_nvcc
+    elif args:
+        compiler = Path(shutil.which(args[0]) or args[0]).resolve()
+    else:
+        compiler = Path("/usr/local/cuda-13.2/bin/nvcc")
+        if not compiler.is_file():
+            compiler = Path(shutil.which("nvcc") or compiler)
+    compiler = compiler.resolve()
+    if not compiler.is_file() or not os.access(compiler, os.X_OK):
+        raise RuntimeError(f"CUDA 13.2 compiler not found: {compiler}")
+    version = subprocess.check_output([str(compiler), "--version"], text=True)
+    if "release 13.2," not in version:
+        raise RuntimeError(f"The Linux wheel requires the CUDA 13.2 toolkit. Checked {compiler}.")
+    return compiler, shlex.join(args[1:]), version
+
+
 def check_metal() -> None:
     # `xcrun --find metal` succeeds even when Xcode 26+ lacks its separately downloaded
     # Metal toolchain, so run the compiler to fail before the long native build starts.
@@ -58,16 +92,13 @@ def main(*, editable: bool = False) -> None:
             "Source installation supports Apple silicon macOS or Linux x86_64 with CUDA."
         )
     cuda = target[0] == "Linux"
+    cuda_cache_key = ""
     if cuda:
-        # pip supplies the Python build tools. nvcc comes from the host toolkit.
-        toolkit = Path(os.environ.get("CUDA_HOME", "/usr/local/cuda-13.2"))
-        if (toolkit / "bin/nvcc").is_file():
-            os.environ["PATH"] = str(toolkit / "bin") + os.pathsep + os.environ["PATH"]
-        elif "CUDA_HOME" in os.environ:
-            raise RuntimeError(f"nvcc not found under CUDA_HOME: {toolkit}")
-        nvcc = shutil.which("nvcc")
-        if nvcc:
-            os.environ["CUDA_HOME"] = str(Path(nvcc).resolve().parents[1])
+        nvcc, nvcc_args, version = cuda_compiler()
+        toolkit = nvcc.parents[1]
+        os.environ["CUDA_HOME"] = str(toolkit)
+        os.environ["PATH"] = str(nvcc.parent) + os.pathsep + os.environ["PATH"]
+        cuda_cache_key = f":{nvcc}:{nvcc_args}:{version}"
     for tool in (
         ("git", "cmake", "nvcc", "patchelf", "readelf", "ldd", "make")
         if cuda
@@ -97,9 +128,6 @@ def main(*, editable: bool = False) -> None:
             raise RuntimeError(
                 f"ExecuTorch requires torch {expected_torch}; found {torch.__version__}"
             )
-        nvcc_version = subprocess.check_output(["nvcc", "--version"], text=True)
-        if "release 13.2," not in nvcc_version:
-            raise RuntimeError("The Linux wheel requires the CUDA 13.2 toolkit.")
         linux = runpy.run_path(str(ROOT / "packaging/linux.py"))
         runtime = os.environ.get("MUSE_GLIMMER_CXX_RUNTIME_DIR")
         if not runtime:
@@ -125,7 +153,7 @@ def main(*, editable: bool = False) -> None:
     local_changes = acquisition["local_source_hash"](source) if editable else ""
     source_id = f"{revision}-{local_changes}" if local_changes else revision
     key = hashlib.sha256(
-        f"clean-worker:{target}:{source}:{source_id}:{minimum}:{sys.version_info[:2]}:{torch.__version__ if cuda else 'mlx'}:{os.environ.get('TORCH_CUDA_ARCH_LIST', '')}".encode()
+        f"clean-worker:{target}:{source}:{source_id}:{minimum}:{sys.version_info[:2]}:{torch.__version__ if cuda else 'mlx'}:{os.environ.get('TORCH_CUDA_ARCH_LIST', '')}{cuda_cache_key}".encode()
     ).hexdigest()[:16]
     # A temporary release runner supplies its own cache directory for cleanup.
     cache = os.environ.get(
@@ -156,7 +184,11 @@ def main(*, editable: bool = False) -> None:
             [
                 f"-DEXECUTORCH_BUILD_PRESET_FILE={snapshot / 'tools/cmake/preset/linux.cmake'}",
                 "-DEXECUTORCH_BUILD_CUDA=ON",
-                f"-DCUDAToolkit_ROOT={os.environ['CUDA_HOME']}",
+                f"-DCMAKE_CUDA_COMPILER:FILEPATH={nvcc}",
+                f"-DCMAKE_CUDA_COMPILER_ARG1:STRING={nvcc_args}",
+                f"-DCUDA_NVCC_EXECUTABLE:FILEPATH={nvcc}",
+                f"-DCUDA_TOOLKIT_ROOT_DIR:PATH={toolkit}",
+                f"-DCUDAToolkit_ROOT:PATH={toolkit}",
                 "-DEXECUTORCH_BUILD_MLX=OFF",
                 "-DEXECUTORCH_BUILD_XNNPACK=OFF",
                 "-DCMAKE_BUILD_RPATH_USE_ORIGIN=ON",
