@@ -56,21 +56,38 @@ pip install -e .
 Build with a CUDA 13.2 toolkit, a C++ compiler, Git, and Python 3.11+:
 
 ```sh
-python -m pip install build
 export CUDA_HOME=/usr/local/cuda-13.2
 export PATH="$CUDA_HOME/bin:$PATH"
 export TORCH_CUDA_ARCH_LIST="8.0 8.6 8.9 9.0 10.0 12.0+PTX"
-python -m build --wheel
+python -m pip install --extra-index-url https://download.pytorch.org/whl/test/cu132 \
+  build setuptools wheel 'cmake>=3.26,<4' pyyaml patchelf 'torch==2.15.0+cu132'
+python -m build --wheel --no-isolation
 pip install dist/*-linux_x86_64.whl
 ```
 
-The wheel bundles the native worker and CUDA runtime dependencies. Serving needs
+The wheel bundles the native worker, CUDA runtime dependencies, and GNU C++ runtime. Serving needs
 an NVIDIA driver, but does not need PyTorch, a CUDA toolkit, or a source checkout.
 The initial wheel uses the `linux_x86_64` tag; its system-library requirements
 come from the build host. It is not a manylinux wheel.
-The current CUDA 13.2 export also requires `libstdc++` providing
-`GLIBCXX_3.4.30` (GCC 12+) at runtime; an older system library can prevent model
-loading even when the worker's startup check passes.
+The build needs a GNU C++ runtime providing `GLIBCXX_3.4.30` (GCC 12+).
+If it is outside the compiler's normal library path, set
+`MUSE_GLIMMER_CXX_RUNTIME_DIR` to the directory containing `libstdc++.so.6`
+and `libgcc_s.so.1`. The bundled libraries are resolved relative to the worker;
+serving does not require an `LD_LIBRARY_PATH` override. The current local build
+requires glibc 2.34+ and an x86-64-v2 CPU.
+
+For editable development, the native build runs during `pip install -e .`.
+After installing the build dependencies above, run:
+
+```sh
+python -m pip install -e . --no-build-isolation
+```
+
+Alternatively, `python install.py --editable` prepares the pinned build
+dependencies and then invokes that pip command, following ExecuTorch's installer
+flow. Python package edits are visible immediately. Re-run the install command
+after native or vendored ExecuTorch changes; it reuses the incremental CMake
+build cache and stages the worker and its libraries into the source package.
 
 For a local CUDA text-only solo export, keep its PTE and `aoti_cuda_blob.ptd` in
 the same directory, then start the server:

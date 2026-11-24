@@ -23,7 +23,7 @@ def prepare(wheelhouse: Path) -> None:
     command = [
         sys.executable, "-m", "pip", "download", "--only-binary=:all:",
         "--implementation", "cp", "--python-version", "3.11", "--abi", "cp311",
-        "--extra-index-url", "https://download.pytorch.org/whl/cu132",
+        "--extra-index-url", "https://download.pytorch.org/whl/test/cu132",
         "--dest", str(wheelhouse),
     ]
     for minor in range(28, 16, -1):
@@ -75,8 +75,9 @@ def build(image: str, wheelhouse: Path, output: Path) -> None:
         "CMAKE_BUILD_PARALLEL_LEVEL": os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL", "8"),
         "MUSE_GLIMMER_BUILD_CACHE": str(cache),
     }
-    if os.environ.get("MUSE_GLIMMER_STB_INCLUDE_DIR"):
-        env["MUSE_GLIMMER_STB_INCLUDE_DIR"] = os.environ["MUSE_GLIMMER_STB_INCLUDE_DIR"]
+    for name in ("MUSE_GLIMMER_STB_INCLUDE_DIR", "MUSE_GLIMMER_CXX_RUNTIME_DIR"):
+        if os.environ.get(name):
+            env[name] = os.environ[name]
     for name, value in env.items():
         command.extend(["--env", f"{name}={value}"])
     quote = shlex.quote

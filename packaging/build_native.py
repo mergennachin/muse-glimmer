@@ -6,6 +6,7 @@ import hashlib
 import os
 import platform
 import runpy
+import shlex
 import shutil
 import subprocess
 import sys
@@ -89,6 +90,19 @@ def main(*, editable: bool = False) -> None:
         toolkit = subprocess.check_output(["nvcc", "--version"], text=True)
         if "release 13.2," not in toolkit:
             raise RuntimeError("The Linux wheel requires the CUDA 13.2 toolkit.")
+        runtime = os.environ.get("MUSE_GLIMMER_CXX_RUNTIME_DIR")
+        if not runtime:
+            compiler = shlex.split(os.environ.get("CXX", "c++"))
+            library = subprocess.check_output(
+                [*compiler, "-print-file-name=libstdc++.so.6"], text=True
+            ).strip()
+            runtime = str(Path(library).resolve().parent)
+        runtime = Path(runtime).expanduser().resolve()
+        for name in ("libstdc++.so.6", "libgcc_s.so.1"):
+            if not (runtime / name).is_file():
+                raise RuntimeError(f"Missing GNU runtime library: {runtime / name}")
+        runpy.run_path(str(ROOT / "packaging/linux.py"))["check_cxx_runtime"](runtime / "libstdc++.so.6")
+        os.environ["MUSE_GLIMMER_CXX_RUNTIME_DIR"] = str(runtime)
     local_changes = acquisition["local_source_hash"](source) if editable else ""
     source_id = f"{revision}-{local_changes}" if local_changes else revision
     key = hashlib.sha256(

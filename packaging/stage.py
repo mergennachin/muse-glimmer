@@ -116,6 +116,14 @@ def _stage(source: Path, worker_dir: Path, package: Path, *, editable: bool) -> 
     ]
     build = worker_dir.parents[2]
     stb = Path(os.environ.get("MUSE_GLIMMER_STB_INCLUDE_DIR", build / "_deps/stb-src"))
+    cache = build / "CMakeCache.txt"
+    if "MUSE_GLIMMER_STB_INCLUDE_DIR" not in os.environ and cache.is_file():
+        for line in cache.read_text().splitlines():
+            if line.startswith("MUSE_GLIMMER_STB_INCLUDE_DIR:"):
+                value = line.split("=", 1)[1]
+                if value:
+                    stb = Path(value)
+                break
     fmt = build / "executorch/backends/mlx/mlx/_deps/fmt-src"
     fetched = [stb] if cuda else [stb, fmt]
     for directory in [*(source / relative for relative in license_roots), *fetched]:
@@ -149,5 +157,13 @@ def _stage(source: Path, worker_dir: Path, package: Path, *, editable: bool) -> 
             if not copyright.is_file():
                 raise ValueError(f"Missing OpenMP runtime license: {copyright}")
             notices.append(f"--- GNU OpenMP runtime ---\n\n{copyright.read_text()}\n")
+        # libstdc++ and libgcc are private worker dependencies. AOTI model
+        # libraries loaded later also resolve this already-loaded runtime.
+        licenses = ROOT / "packaging/licenses"
+        for name in ("GCC-COPYING3", "GCC-RUNTIME-EXCEPTION"):
+            path = licenses / name
+            if not path.is_file():
+                raise ValueError(f"Missing bundled GCC runtime license: {path}")
+            notices.append(f"--- GNU C++/GCC runtime {name} ---\n\n{path.read_text()}\n")
     (native / "THIRD_PARTY_NOTICES").write_text("\n".join(notices))
     return revision

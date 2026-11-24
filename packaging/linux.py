@@ -14,11 +14,20 @@ SYSTEM_LIBRARIES = {
     "libdl.so.2",
     "libpthread.so.0",
     "librt.so.1",
-    "libstdc++.so.6",
-    "libgcc_s.so.1",
     "ld-linux-x86-64.so.2",
     "libcuda.so.1",
 }
+CXX_RUNTIME_LIBRARIES = {"libstdc++.so.6", "libgcc_s.so.1"}
+CXX_RUNTIME_VERSION = "GLIBCXX_3.4.30"
+
+
+def check_cxx_runtime(library: Path) -> None:
+    versions = subprocess.check_output(["readelf", "--version-info", str(library)], text=True)
+    if CXX_RUNTIME_VERSION not in versions:
+        raise ValueError(
+            f"CUDA AOTI models require {CXX_RUNTIME_VERSION}; {library} does not provide it. "
+            "Set MUSE_GLIMMER_CXX_RUNTIME_DIR to a GCC 12+ runtime directory."
+        )
 
 
 def dependencies(binary: Path, *, isolated: bool = False) -> dict[str, Path]:
@@ -59,15 +68,23 @@ def bundle(worker: Path, native: Path) -> list[Path]:
     check_elf(worker)
     native.mkdir(parents=True, exist_ok=True)
     pending = {worker.name: worker, **dependencies(worker)}
+    runtime = os.environ.get("MUSE_GLIMMER_CXX_RUNTIME_DIR")
+    runtime = Path(runtime).expanduser().resolve() if runtime else None
     copied = {}
     while pending:
         name, original = pending.popitem()
+        if runtime and name in CXX_RUNTIME_LIBRARIES:
+            original = runtime / name
+            if not original.is_file():
+                raise ValueError(f"Missing C++ runtime library: {original}")
         if name in copied:
             if copied[name].resolve() != original.resolve():
                 raise ValueError(f"Conflicting native libraries named {name}")
             continue
         if name.startswith(("libtorch", "libc10", "libpython")):
             raise ValueError(f"Worker must run without PyTorch or Python shared libraries: {name}")
+        if name == "libstdc++.so.6":
+            check_cxx_runtime(original)
         copied[name] = original
         shutil.copy2(original, native / name)
         pending.update(dependencies(original))
