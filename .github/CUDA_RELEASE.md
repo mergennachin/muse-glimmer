@@ -31,6 +31,24 @@ download. A PyPI release still needs an accepted platform tag and an ABI audit
 against the chosen modern baseline; do not relabel the raw wheel without that
 check. The CUDA 13.2 build and live model smoke have been validated on sm80.
 
+## Reproducing the 17G text-solo export
+
+In an export environment with the pinned ExecuTorch export dependencies, run
+the following from the package checkout.
+
+```sh
+hf download meta-models/Muse-Glimmer-30B-GGUF \
+  Muse-Glimmer-30B-KQuant-17GB-Q4_K_M.gguf \
+  --revision b44f1072cf75e918a1b82a3a17b45c4389b076e7 --local-dir models
+python packaging/export_cuda.py \
+  --checkpoint models/Muse-Glimmer-30B-KQuant-17GB-Q4_K_M.gguf
+```
+
+The exporter verifies the source checksum and writes the PTE, its companion
+PTD, and `provenance.json`. For the cell-layout export with 131072 shared KV
+cells, four live sessions, eight cached prefixes, and four capture slots leave
+8191 tokens per slot after reserving one padding cell.
+
 ## What is already handled
 
 - One version/tag and source commit for every platform.
@@ -86,7 +104,7 @@ check. The CUDA 13.2 build and live model smoke have been validated on sm80.
 Within `linux_wheel.yml`, build exactly one wheel and record it:
 
 ```sh
-python -m build --wheel --no-isolation
+python -m build --wheel
 python packaging/release.py record --platform linux-x86_64-cuda-13_2 dist
 ```
 

@@ -41,8 +41,8 @@ jobs:
         run: |
           export PATH="$CUDA_HOME/bin:$PATH"
           nvcc --version
-          uv pip install --extra-index-url https://download.pytorch.org/whl/test/cu132 build setuptools wheel 'cmake>=3.26,<4' pyyaml patchelf 'torch==2.15.0+cu132'
-          python -m build --wheel --no-isolation
+          uv pip install build
+          python -m build --wheel
       - name: Record platform artifact
         run: python packaging/release.py record --platform '${{ env.RELEASE_PLATFORM }}' dist
         if: inputs.coordinated

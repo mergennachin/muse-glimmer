@@ -58,6 +58,16 @@ def main(*, editable: bool = False) -> None:
             "Source installation supports Apple silicon macOS or Linux x86_64 with CUDA."
         )
     cuda = target[0] == "Linux"
+    if cuda:
+        # pip supplies the Python build tools. nvcc comes from the host toolkit.
+        toolkit = Path(os.environ.get("CUDA_HOME", "/usr/local/cuda-13.2"))
+        if (toolkit / "bin/nvcc").is_file():
+            os.environ["PATH"] = str(toolkit / "bin") + os.pathsep + os.environ["PATH"]
+        elif "CUDA_HOME" in os.environ:
+            raise RuntimeError(f"nvcc not found under CUDA_HOME: {toolkit}")
+        nvcc = shutil.which("nvcc")
+        if nvcc:
+            os.environ["CUDA_HOME"] = str(Path(nvcc).resolve().parents[1])
     for tool in (
         ("git", "cmake", "nvcc", "patchelf", "readelf", "ldd", "make")
         if cuda
@@ -87,21 +97,30 @@ def main(*, editable: bool = False) -> None:
             raise RuntimeError(
                 f"ExecuTorch requires torch {expected_torch}; found {torch.__version__}"
             )
-        toolkit = subprocess.check_output(["nvcc", "--version"], text=True)
-        if "release 13.2," not in toolkit:
+        nvcc_version = subprocess.check_output(["nvcc", "--version"], text=True)
+        if "release 13.2," not in nvcc_version:
             raise RuntimeError("The Linux wheel requires the CUDA 13.2 toolkit.")
+        linux = runpy.run_path(str(ROOT / "packaging/linux.py"))
         runtime = os.environ.get("MUSE_GLIMMER_CXX_RUNTIME_DIR")
         if not runtime:
             compiler = shlex.split(os.environ.get("CXX", "c++"))
             library = subprocess.check_output(
                 [*compiler, "-print-file-name=libstdc++.so.6"], text=True
             ).strip()
-            runtime = str(Path(library).resolve().parent)
+            runtime = Path(library).resolve().parent
+            # A venv can use a Conda Python whose own C++ runtime is newer
+            # than the system compiler's (e.g. GCC 11 on RHEL 9).
+            for candidate in dict.fromkeys((runtime, Path(sys.prefix) / "lib", Path(sys.base_prefix) / "lib")):
+                lib = candidate / "libstdc++.so.6"
+                if lib.is_file() and (candidate / "libgcc_s.so.1").is_file():
+                    if linux["provides_cxx_runtime"](lib):
+                        runtime = candidate
+                        break
         runtime = Path(runtime).expanduser().resolve()
         for name in ("libstdc++.so.6", "libgcc_s.so.1"):
             if not (runtime / name).is_file():
                 raise RuntimeError(f"Missing GNU runtime library: {runtime / name}")
-        runpy.run_path(str(ROOT / "packaging/linux.py"))["check_cxx_runtime"](runtime / "libstdc++.so.6")
+        linux["check_cxx_runtime"](runtime / "libstdc++.so.6")
         os.environ["MUSE_GLIMMER_CXX_RUNTIME_DIR"] = str(runtime)
     local_changes = acquisition["local_source_hash"](source) if editable else ""
     source_id = f"{revision}-{local_changes}" if local_changes else revision
@@ -137,6 +156,7 @@ def main(*, editable: bool = False) -> None:
             [
                 f"-DEXECUTORCH_BUILD_PRESET_FILE={snapshot / 'tools/cmake/preset/linux.cmake'}",
                 "-DEXECUTORCH_BUILD_CUDA=ON",
+                f"-DCUDAToolkit_ROOT={os.environ['CUDA_HOME']}",
                 "-DEXECUTORCH_BUILD_MLX=OFF",
                 "-DEXECUTORCH_BUILD_XNNPACK=OFF",
                 "-DCMAKE_BUILD_RPATH_USE_ORIGIN=ON",

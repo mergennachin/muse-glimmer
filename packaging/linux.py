@@ -21,9 +21,13 @@ CXX_RUNTIME_LIBRARIES = {"libstdc++.so.6", "libgcc_s.so.1"}
 CXX_RUNTIME_VERSION = "GLIBCXX_3.4.30"
 
 
-def check_cxx_runtime(library: Path) -> None:
+def provides_cxx_runtime(library: Path) -> bool:
     versions = subprocess.check_output(["readelf", "--version-info", str(library)], text=True)
-    if CXX_RUNTIME_VERSION not in versions:
+    return CXX_RUNTIME_VERSION in versions
+
+
+def check_cxx_runtime(library: Path) -> None:
+    if not provides_cxx_runtime(library):
         raise ValueError(
             f"CUDA AOTI models require {CXX_RUNTIME_VERSION}; {library} does not provide it. "
             "Set MUSE_GLIMMER_CXX_RUNTIME_DIR to a GCC 12+ runtime directory."
