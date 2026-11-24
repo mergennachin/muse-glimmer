@@ -53,6 +53,13 @@ pip install -e .
 
 ## Linux CUDA 13.2
 
+The prebuilt Linux wheel targets glibc 2.34+ and an x86-64-v2 CPU. Install a
+downloaded wheel directly:
+
+```sh
+python -m pip install /path/to/muse_glimmer-VERSION-py3-none-linux_x86_64.whl
+```
+
 Build with a CUDA 13.2 toolkit, a C++ compiler, Git, and Python 3.11+:
 
 ```sh

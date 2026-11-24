@@ -112,7 +112,9 @@ python packaging/release_runner.py RUN_ID --label cuda-13_2
 This builds and attests the wheel, tests installation on Python 3.11/3.13, and
 runs live generation on Python 3.13. It uploads
 `muse-glimmer-linux-x86_64-cuda-13_2` without publishing. The build uses
-`linux_x86_64` and the build host's glibc/libstdc++; it makes no manylinux claim.
+`linux_x86_64`, targets glibc 2.34+/x86-64-v2, and bundles the GNU C++ runtime.
+Older-glibc compatibility is outside the initial release scope. Before PyPI
+publication, validate an accepted wheel tag for the chosen modern baseline.
 Shared releases still require the acceptance checks in `CUDA_RELEASE.md` and a
 revision-pinned CUDA model catalog entry. They record manifests and checksums
 through the coordinator's existing artifact contract.

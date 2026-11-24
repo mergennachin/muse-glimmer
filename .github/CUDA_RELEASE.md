@@ -1,8 +1,8 @@
 # CUDA release handoff
 
 CUDA 13.2 build and serving support and the Linux workflow are implemented.
-Shared CUDA publication remains disabled pending real-model acceptance checks
-and a revision-pinned CUDA model catalog entry. Use [RELEASING.md](RELEASING.md)
+Shared CUDA publication remains disabled pending workflow validation, a PyPI-accepted
+wheel tag, and a revision-pinned CUDA model catalog entry. Use [RELEASING.md](RELEASING.md)
 for the manual Linux validation workflow and the shared release pipeline. Keep
 the top-level README limited to working user flows.
 
@@ -14,11 +14,22 @@ dynamic method through 512 tokens. The installed-wheel live smoke suite passed
 requests, including streaming, tools, and prefix reuse. The existing reversed
 tool-result case was skipped for ExecuTorch issue 25299.
 
-This passed with a newer `libstdc++` explicitly supplied through
-`LD_LIBRARY_PATH`. The unmodified host runtime failed to load the AOTI library
-because it lacks `GLIBCXX_3.4.30`. Resolve and verify the compiler-runtime
-requirements in the portable wheel/model combination before publication; a
-successful worker `--help` check alone does not validate model loading.
+The rebuilt 26 MB wheel bundles `libstdc++` and `libgcc` and passed this live
+smoke suite without PyTorch, build tools on PATH, or an `LD_LIBRARY_PATH`
+override. This resolves the model-loading failure caused by the host's older
+`libstdc++`. Fresh binary-only installation and a real editable source install
+also passed. Source builds retain PyTorch 2.15.0+cu132 for code generation and
+native headers; wheel installation and serving do not need PyTorch.
+
+## Supported Linux baseline
+
+Target modern Linux: glibc 2.34+, x86-64-v2, Python 3.11+, and an NVIDIA driver
+supporting CUDA 13.2. Older-glibc support is outside the initial release scope;
+rebuilding against manylinux_2_28 is not an acceptance requirement. The current
+candidate uses the `linux_x86_64` tag and can be installed directly from a wheel
+download. A PyPI release still needs an accepted platform tag and an ABI audit
+against the chosen modern baseline; do not relabel the raw wheel without that
+check. The CUDA 13.2 build and live model smoke have been validated on sm80.
 
 ## What is already handled
 
@@ -38,8 +49,8 @@ successful worker `--help` check alone does not validate model loading.
 
 1. **Choose and verify the support baseline.** Confirm CPU architecture, actual
    CUDA toolkit version, minimum NVIDIA driver, supported GPU architectures and
-   glibc baseline. `linux-x86_64-cuda-13_2` is a proposed artifact identifier,
-   not a promise of CUDA 13.2 support. Update the coordinator's Linux condition
+   glibc baseline. `linux-x86_64-cuda-13_2` is the validated CUDA baseline's
+   artifact identifier. Update the coordinator's Linux condition
    and runner labels if the final identifier changes.
 2. **Implement the native/package path.** Extend `packaging/build_native.py`,
    `packaging/source.py`, `packaging/stage.py`, `packaging/native/CMakeLists.txt`,
@@ -55,9 +66,9 @@ successful worker `--help` check alone does not validate model loading.
    Preserve batching, session behavior, DFlash defaults where supported, and
    useful errors for unsupported drivers/GPUs. The model recipe lives in the
    pinned ExecuTorch submodule; coordinate any pin update for both platforms.
-4. **Replace the fail-closed `linux_wheel.yml` scaffold.** Use `mac_wheel.yml` as
-   the build/test contract, adding the necessary Linux build image/toolchain.
-   Use an appropriate manylinux environment and `auditwheel` where applicable;
+4. **Validate `linux_wheel.yml`.** Use a reproducible modern Linux build
+   image/toolchain and the existing installed-wheel/live-model test contract.
+   Audit the actual ABI and use an accepted wheel tag for PyPI publication;
    changing a filename alone does not establish manylinux compatibility.
 5. **Test on real hardware.** Build from clean sources, install the wheel without
    a compiler or CUDA toolkit, start its native worker, run the full applicable
@@ -75,7 +86,7 @@ successful worker `--help` check alone does not validate model loading.
 Within `linux_wheel.yml`, build exactly one wheel and record it:
 
 ```sh
-python -m build --wheel
+python -m build --wheel --no-isolation
 python packaging/release.py record --platform linux-x86_64-cuda-13_2 dist
 ```
 
@@ -93,13 +104,15 @@ structure; validate the Linux/glibc/driver requirements before filling them in):
 {
   "runner": ["self-hosted", "Linux", "X64", "cuda-13_2"],
   "workflow": "linux_wheel.yml",
-  "wheel_tag": "py3-none-manylinux_2_28_x86_64",
+  "wheel_tag": "py3-none-linux_x86_64",
   "description": "NVIDIA CUDA 13.2",
-  "requirements": "REPLACE WITH VERIFIED GLIBC, DRIVER, GPU AND PYTHON REQUIREMENTS"
+  "requirements": "glibc 2.34+, x86-64-v2 CPU, Python 3.11+, NVIDIA driver supporting CUDA 13.2"
 }
 ```
 
-The tag above is illustrative. pip understands OS/architecture/Python tags,
+The tag above describes the direct-download candidate; replace it with the
+validated, PyPI-accepted tag before enabling shared registry publication.
+pip understands OS/architecture/Python tags,
 **not CUDA versions**. Start with one CUDA baseline per Linux architecture;
 two CUDA variants must not produce the same wheel filename or compatibility tag.
 If `auditwheel` emits multiple platform tags, put the full dot-separated tag in
