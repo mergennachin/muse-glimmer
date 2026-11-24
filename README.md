@@ -1,10 +1,23 @@
 # muse-glimmer
 
-Run [Muse Glimmer 30B](https://ai.meta.ai/research/publications/muse-glimmer-30b-an-on-device-agentic-model/) locally with an OpenAI-compatible chat API. Development preview.
+Serve [Muse Glimmer 30B](https://ai.meta.com/research/publications/muse-glimmer-30b-an-on-device-agentic-model/) locally. Development preview.
 
-## Install
+**Supported platforms:** macOS 26.2+ on Apple silicon and Linux x86_64 with CUDA 13.2. Requires Python 3.11+.
+The CUDA model was tested on an 80 GB A100 and exceeds Ada GPUs’ shared-memory limit.
 
-Use Python 3.11 or newer.
+## Quickstart
+
+Until the CUDA wheel is published on PyPI, replace the first command on Linux with
+`pip install -e .` from this checkout or `pip install ./muse_glimmer-*-linux_x86_64.whl` for a downloaded wheel.
+
+```sh
+pip install --pre muse-glimmer
+muse-glimmer pull 1.0
+muse-glimmer serve
+```
+
+`pull 1.0` selects 17G DFlash2 (seven draft proposals) on Apple silicon and 17G text-solo on Linux.
+Serves at `http://127.0.0.1:8000` with a live terminal HUD. **Ctrl+C** stops it.
 
 <details>
 <summary>Create a Python environment (Conda or uv)</summary>
@@ -25,80 +38,24 @@ source .venv/bin/activate
 
 </details>
 
-### Apple silicon (macOS 26.2+)
-
-```sh
-pip install --pre muse-glimmer
-```
-
 <details>
-<summary>Build from source on macOS</summary>
+<summary>Install from source</summary>
 
-Requires Git and Xcode with the Metal toolchain:
+Linux builds require Git, Make, the CUDA 13.2 toolkit, and a C++ toolchain with a GCC 12+ runtime.
+On macOS, set up Xcode with the Metal toolchain:
 
 ```sh
 sudo xcodebuild -license accept
 xcodebuild -downloadComponent MetalToolchain
+```
+
+```sh
 git clone --recursive https://github.com/mergennachin/muse-glimmer.git
 cd muse-glimmer
 pip install -e .
 ```
 
 </details>
-
-### Linux x86_64 (CUDA 13.2)
-
-The default CUDA export was tested on an 80 GB A100. Its prefill kernels need
-144 KiB of shared memory per thread block. Ada GPUs, including the RTX 6000 Ada,
-have a 99 KiB limit and cannot run this export.
-
-If you have the prebuilt wheel, install it from the directory containing the
-download. It requires glibc 2.34+, an x86-64-v2 CPU, and an NVIDIA driver
-supporting CUDA 13.2.
-
-```sh
-pip install ./muse_glimmer-*-linux_x86_64.whl
-```
-
-To build from source, run this from the repository root with Git, Make, the
-CUDA 13.2 toolkit, and a C++ toolchain with a GCC 12+ runtime installed.
-
-```sh
-pip install -e .
-```
-
-## Download and serve
-
-`pull 1.0` selects the 17G DFlash2 model with seven draft proposals on Apple
-silicon and the 17G text-solo model on Linux (17.89 GB download).
-[Model files on Hugging Face](https://huggingface.co/SocialLocalMobile/Muse-Glimmer-30B-ExecuTorch-PTE)
-
-```sh
-muse-glimmer pull 1.0
-muse-glimmer serve
-```
-
-The server listens at `http://127.0.0.1:8000` and shows activity in the terminal.
-
-## Send a chat request
-
-With the server running, try this in a second terminal. For an OpenAI-compatible
-client, use `http://127.0.0.1:8000/v1` as the base URL and `muse-glimmer-30B`
-as the model ID.
-
-```sh
-curl --fail-with-body http://127.0.0.1:8000/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "model": "muse-glimmer-30B",
-    "messages": [{"role": "user", "content": "Say hello."}],
-    "max_tokens": 512,
-    "temperature": 0.7
-  }'
-```
-
-Press **Ctrl+C** in the server terminal when you're done. The `--launch`
-commands below start their own server on the same port.
 
 ## Coding agents
 
@@ -128,17 +85,28 @@ Your browser opens at `http://127.0.0.1:8080`. Chats are saved locally. **Ctrl+C
 
 <img src="img/open-webui-demo.png" alt="Chatting with Muse Glimmer in Open WebUI" width="600">
 
-## Options
+## Smoke test
 
-Use `pull --list` to see the recommended, downloaded, and selected variants
-for your machine.
+With the server running, open another terminal:
 
 ```sh
-muse-glimmer pull --list
+curl --fail-with-body http://127.0.0.1:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "muse-glimmer-30B",
+    "messages": [{"role": "user", "content": "Say hello."}],
+    "max_tokens": 512,
+    "temperature": 0.7
+  }'
+```
+
+## Options
+
+For model selection, downloads, and server options:
+
+```sh
 muse-glimmer pull --help
 muse-glimmer serve --help
 ```
 
-In a `--config` file, use top-level settings for both platforms and
-`[backends.metal]` or `[backends.cuda]` for overrides.
-[default_config.toml](default_config.toml) lists the defaults.
+[default_config.toml](default_config.toml) documents the configuration settings.
