@@ -1,4 +1,5 @@
-# Shared serving defaults.
+# Serving defaults. Top-level settings apply to both backends.
+# Within this file or a --config file, the active backend's table overrides the top level.
 # Precedence: CLI flags > explicit --config file > pulled model defaults > this file.
 # Config files are read in place. Relative paths use the current directory.
 # Example: muse-glimmer serve --model /path/model.pte --config ./config.toml
@@ -27,10 +28,12 @@ prefix_cache_entries = 8
 # use fewer cache entries for long conversations.
 prefix_checkpoint_prompt_end = "every"
 
-# DFlash defaults to enabled on macOS and disabled on Linux.
-# Pulled variants select their matching mode.
-# For a local solo export, disable it with --no-dflash or dflash = false.
+# Draft proposals per step when DFlash is enabled. 0 uses the exported maximum.
+dflash_n_draft = 7
+
+# Default decoding mode for a local export. A pulled model supplies its own mode.
+[backends.metal]
 dflash = true
 
-# Draft proposals per step, used only with DFlash. 0 uses the exported maximum.
-dflash_n_draft = 7
+[backends.cuda]
+dflash = false

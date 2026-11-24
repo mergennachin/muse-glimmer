@@ -119,4 +119,6 @@ muse-glimmer pull --help
 muse-glimmer serve --help
 ```
 
-[default_config.toml](default_config.toml) documents the configuration settings.
+In a `--config` file, use top-level settings for both platforms and
+`[backends.metal]` or `[backends.cuda]` for overrides.
+[default_config.toml](default_config.toml) lists the defaults.
