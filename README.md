@@ -16,7 +16,6 @@ muse-glimmer pull 1.0
 muse-glimmer serve
 ```
 
-`pull 1.0` selects 17G DFlash2 (seven draft proposals) on Apple silicon and 17G text-solo on Linux.
 Serves at `http://127.0.0.1:8000` with a live terminal HUD. **Ctrl+C** stops it.
 
 <details>
