@@ -76,13 +76,17 @@ For a local CUDA text-only solo export, keep its PTE and `aoti_cuda_blob.ptd` in
 the same directory, then start the server:
 
 ```sh
-muse-glimmer serve --model /path/to/muse-glimmer-k-quant-17G-128K-text-solo-cuda
+muse-glimmer serve --model /path/to/muse-glimmer-k-quant-17G-128K-text-solo-cuda --context 8191
 ```
 
-Linux defaults to solo decoding. The exported 128K context is a per-session
-limit; the CUDA export also has a shared KV pool limit across concurrent sessions.
-The included export script uses a 131072-cell pool shared by the active sessions.
-GPU memory and the shared pool can limit usable context with concurrent requests.
+Linux defaults to solo decoding. The export supports positions up to 128K,
+but its 131072-cell KV pool must also fit every reserved session, cached prefix,
+and in-progress prefix capture at the configured context length. One cell is
+reserved for padding. The default four sessions, eight cached prefixes, and four
+capture slots reserve 16 contexts, so `--context 8191` fits this export. The
+package's default 128K serving context exceeds this pool and prevents startup;
+pass the smaller context explicitly. Larger contexts require fewer reserved slots
+or an export with a larger KV pool.
 
 To reproduce the export, install the pinned ExecuTorch revision's export
 dependencies and PyTorch 2.15.0 with CUDA 13.2, then run:
