@@ -1,0 +1,21 @@
+name: Build Linux CUDA wheel
+on:
+  workflow_dispatch:
+    inputs:
+      model-path:
+        description: Absolute CUDA export directory on the Linux runner host
+        type: string
+        required: true
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+concurrency:
+  group: wheel-linux-cuda-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  linux:
+    uses: ./.github/workflows/linux_wheel.yml
+    with:
+      coordinated: false
+      model-path: ${{ inputs.model-path }}

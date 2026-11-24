@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import re
+import runpy
 import subprocess
 import tempfile
 import tomllib
@@ -22,7 +23,10 @@ def check_wheel(wheel: Path) -> None:
     minimum = project["tool"]["muse-glimmer"]["macos-deployment-target"]
     version = project["project"]["version"]
     target = tuple(map(int, minimum.split(".")))
-    tag = f"py3-none-macosx_{target[0]}_0_arm64"
+    cuda_tags = {"py3-none-linux_x86_64", "py3-none-manylinux_2_28_x86_64"}
+    candidate_tag = wheel.name.removeprefix(f"muse_glimmer-{version}-").removesuffix(".whl")
+    cuda = candidate_tag in cuda_tags
+    tag = candidate_tag if cuda else f"py3-none-macosx_{target[0]}_0_arm64"
     if wheel.name != f"muse_glimmer-{version}-{tag}.whl":
         raise ValueError(f"Expected muse-glimmer {version} ({tag}), got {wheel.name}")
     with zipfile.ZipFile(wheel) as archive, tempfile.TemporaryDirectory() as directory:
@@ -35,7 +39,7 @@ def check_wheel(wheel: Path) -> None:
         package = worker_name.rsplit("/_native/", 1)[0]
         for name in (
             "_native/muse_glimmer_batching_worker",
-            "_native/mlx.metallib",
+            *(() if cuda else ("_native/mlx.metallib",)),
             "_native/THIRD_PARTY_NOTICES",
             "_vendor/LICENSE",
             "_vendor/muse/serve_batching.py",
@@ -59,21 +63,41 @@ def check_wheel(wheel: Path) -> None:
             raise ValueError("Packaged worker is not executable")
         worker = Path(directory) / "worker"
         worker.write_bytes(archive.read(info))
-        architecture = subprocess.check_output(["lipo", "-archs", str(worker)], text=True).strip()
-        if architecture != "arm64":
-            raise ValueError(f"Packaged worker has the wrong architecture: {architecture}")
-        load_commands = subprocess.check_output(["otool", "-l", str(worker)], text=True)
-        versions = re.findall(r"LC_BUILD_VERSION.*?minos (\d+)\.(\d+)", load_commands, re.DOTALL)
-        metal = archive.read(f"{package}/_native/mlx.metallib")
-        metal_versions = re.findall(rb"air64[\w.]*-apple-macosx(\d+)\.(\d+)", metal)
-        for name, values in (("worker", versions), ("Metal library", metal_versions)):
-            if {tuple(map(int, value)) for value in values} != {target}:
-                raise ValueError(f"{name} must be compiled for the macOS {minimum} deployment target")
-        links = subprocess.check_output(["otool", "-L", str(worker)], text=True)
-        for line in links.splitlines()[1:]:
-            dependency = line.strip().split(" (", 1)[0]
-            if not dependency.startswith(("/System/Library/", "/usr/lib/")):
-                raise ValueError(f"Wheel depends on an unbundled library: {dependency}")
+        if cuda:
+            native = Path(directory) / "native"
+            native.mkdir()
+            for name in archive.namelist():
+                if name.startswith(f"{package}/_native/") and not name.endswith("/"):
+                    filename = name.rsplit("/", 1)[1]
+                    (native / filename).write_bytes(archive.read(name))
+            linux = runpy.run_path(str(ROOT / "packaging/linux.py"))
+            linux["check_elf"](native / "muse_glimmer_batching_worker", bundled=True)
+            for binary in native.glob("*.so*"):
+                linux["check_elf"](binary, bundled=True)
+            if provenance.get("backend") != "cuda" or provenance.get("cuda_version") != "13.2":
+                raise ValueError("Linux wheels require CUDA 13.2 provenance")
+        else:
+            architecture = subprocess.check_output(
+                ["lipo", "-archs", str(worker)], text=True
+            ).strip()
+            if architecture != "arm64":
+                raise ValueError(f"Packaged worker has the wrong architecture: {architecture}")
+            load_commands = subprocess.check_output(["otool", "-l", str(worker)], text=True)
+            versions = re.findall(
+                r"LC_BUILD_VERSION.*?minos (\d+)\.(\d+)", load_commands, re.DOTALL
+            )
+            metal = archive.read(f"{package}/_native/mlx.metallib")
+            metal_versions = re.findall(rb"air64[\w.]*-apple-macosx(\d+)\.(\d+)", metal)
+            for name, values in (("worker", versions), ("Metal library", metal_versions)):
+                if {tuple(map(int, value)) for value in values} != {target}:
+                    raise ValueError(
+                        f"{name} must be compiled for the macOS {minimum} deployment target"
+                    )
+            links = subprocess.check_output(["otool", "-L", str(worker)], text=True)
+            for line in links.splitlines()[1:]:
+                dependency = line.strip().split(" (", 1)[0]
+                if not dependency.startswith(("/System/Library/", "/usr/lib/")):
+                    raise ValueError(f"Wheel depends on an unbundled library: {dependency}")
         metadata = next(name for name in archive.namelist() if name.endswith(".dist-info/WHEEL"))
         if f"Tag: {tag}" not in archive.read(metadata).decode():
             raise ValueError("Wheel metadata and filename tags disagree")
@@ -81,7 +105,7 @@ def check_wheel(wheel: Path) -> None:
         distribution = Parser().parsestr(archive.read(metadata).decode())
         if distribution["Name"] != "muse-glimmer" or distribution["Version"] != version:
             raise ValueError("Wheel metadata and release version disagree")
-    print(f"Verified {wheel.name}: native payload, macOS {minimum}, system libraries only.")
+    print(f"Verified {wheel.name}: native payload and bundled dependencies.")
 
 
 def test_install(wheel: Path) -> None:

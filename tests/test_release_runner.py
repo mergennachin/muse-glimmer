@@ -103,8 +103,11 @@ def test_runner_cleanup(tmp_path, monkeypatch, runner_module, outcome, host, arc
 
     children = []
     popen = subprocess.Popen
+    monkeypatch.setenv("MUSE_GLIMMER_CXX_RUNTIME_DIR", str(tmp_path / "gcc-runtime"))
 
     def start(*args, **kwargs):
+        if args[0] == ["./run.sh"] and host == "Linux":
+            assert kwargs["env"]["MUSE_GLIMMER_CXX_RUNTIME_DIR"] == str(tmp_path / "gcc-runtime")
         child = popen(*args, **kwargs)
         children.append(child)
         return child
@@ -140,6 +143,33 @@ def test_runner_cleanup(tmp_path, monkeypatch, runner_module, outcome, host, arc
         outcome in {"interrupt", "runner_exit"}
     )
     assert not any(p.name.startswith("muse-glimmer-runner-") for p in tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("host,workflow,event,allowed", [
+    ("Linux", "wheel-linux-cuda.yml", "workflow_dispatch", True),
+    ("Linux", "wheel-linux-cuda.yml", "push", False),
+    ("Darwin", "wheel-linux-cuda.yml", "workflow_dispatch", False),
+    ("Linux", "wheel.yml", "push", True),
+    ("Linux", "unrelated.yml", "workflow_dispatch", False),
+])
+def test_runner_only_joins_expected_platform_workflows(runner_module, monkeypatch, host, workflow, event, allowed):
+    module = runner_module
+    monkeypatch.setattr(module.platform, "system", lambda: host)
+    monkeypatch.setattr(module.platform, "machine", lambda: "x86_64" if host == "Linux" else "arm64")
+    monkeypatch.setattr(module.shutil, "which", lambda _: "/usr/bin/tool")
+    monkeypatch.setattr(module, "command", Mock(return_value="owner/repo"))
+    read = Mock(return_value={
+        "path": f".github/workflows/{workflow}", "event": event,
+        "status": "completed", "conclusion": "success",
+    })
+    monkeypatch.setattr(module, "api", read)
+    if allowed:
+        assert module.run(123) == 0
+    else:
+        with pytest.raises(RuntimeError, match="Expected a shared wheel release"):
+            module.run(123)
+    # No registration or other mutation happens during validation.
+    read.assert_called_once_with("repos/owner/repo/actions/runs/123")
 
 
 @pytest.mark.parametrize("error", [

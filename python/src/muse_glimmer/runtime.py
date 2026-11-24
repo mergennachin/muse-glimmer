@@ -97,7 +97,7 @@ def server_options(model: Path, settings: Settings) -> list[str]:
         "--hf-tokenizer",
         str(tokenizer),
         "--backend",
-        "mlx",
+        "cuda" if platform.system() == "Linux" else "mlx",
         "--model-id",
         MODEL_ID,
         "--max-context",
@@ -119,6 +119,11 @@ def server_options(model: Path, settings: Settings) -> list[str]:
     ]
     if settings.prefix_cache_entries > 0 and settings.prefix_checkpoint_prompt_end == "every":
         options.extend(["--prefix-checkpoint-prompt-end", "every"])
+    if platform.system() == "Linux":
+        data = model.with_name("aoti_cuda_blob.ptd")
+        if not data.is_file():
+            raise ValueError(f"CUDA export data missing: {data}. Keep the .pte and .ptd together.")
+        options.extend(["--data-path", str(data)])
     pos_embed = model.with_name("pos_embed.bin")
     if pos_embed.is_file():
         options.extend(["--pos-embed-path", str(pos_embed)])

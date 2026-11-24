@@ -1,8 +1,94 @@
 # CUDA release handoff
 
-The shared release process is prepared; **CUDA serving/build support is not
-implemented by this refactor**. Use [RELEASING.md](RELEASING.md) for operating the
-pipeline. Keep the top-level README limited to working user flows.
+CUDA 13.2 build and serving support and the Linux workflow are implemented.
+Shared CUDA wheel publication remains disabled pending workflow validation and a
+PyPI-accepted wheel tag. Model version `1.0` pins the published 17G CUDA text-solo
+export for Linux x86_64. Use [RELEASING.md](RELEASING.md)
+for the manual Linux validation workflow and the shared release pipeline. Keep
+the top-level README limited to working user flows.
+
+## Local validation status
+
+The 17G text-solo CUDA export completed with static forward sizes `1,4` and a
+dynamic method through 512 tokens. The installed-wheel live smoke suite passed
+17 completed requests and intentional disconnect recovery with four concurrent
+requests, including streaming, tools, and prefix reuse. The existing reversed
+tool-result case was skipped for ExecuTorch issue 25299.
+
+The rebuilt 26 MB wheel bundles `libstdc++` and `libgcc` and passed this live
+smoke suite without PyTorch, build tools on PATH, or an `LD_LIBRARY_PATH`
+override. This resolves the model-loading failure caused by the host's older
+`libstdc++`. Fresh binary-only installation and a real editable source install
+also passed. Source builds retain PyTorch 2.15.0+cu132 for code generation and
+native headers; wheel installation and serving do not need PyTorch.
+
+## Known limitations
+
+- **GPU compatibility.** Two prefill kernels in the published 1.0 PTE request
+  147,456 bytes (144 KiB) of dynamic shared memory per block. The `compute_80`
+  PTX fallback retains those launch requirements. They exceed Ada's 99 KiB
+  per-block limit, including on the RTX 6000 Ada. Supporting Ada requires a
+  compatible export and a prefill test on that architecture.
+  [Published export](https://huggingface.co/SocialLocalMobile/Muse-Glimmer-30B-ExecuTorch-PTE/tree/ba91280191bf65c01b324066be05e8755f1754b1/muse-glimmer-k-quant-17G-128K-text-solo-cuda) · [NVIDIA Ada limits](https://docs.nvidia.com/cuda/ada-tuning-guide/index.html#occupancy)
+- **ELF symbol versions.** The wheel checker catches missing library names but
+  can accept a missing symbol version. For example, `ldd` can report
+  `GLIBCXX_3.4.30` missing and still exit successfully. Inspect loader
+  diagnostics and exercise model loading with the bundled C++ runtime.
+- **Release smoke coverage.** Linux CI passes a local model to the smoke helper,
+  which sets `--context 4096`. To check the user quickstart, run
+  `muse-glimmer pull 1.0` followed by `muse-glimmer serve` with the installed
+  wheel. This path passed locally on the A100 with the default 131,072-token
+  context and short prompts. A full-length 128K request remains unverified.
+
+## Supported Linux baseline
+
+Target modern Linux: glibc 2.34+, x86-64-v2, Python 3.11+, and an NVIDIA driver
+supporting CUDA 13.2. Older-glibc support is outside the initial release scope;
+rebuilding against manylinux_2_28 is not an acceptance requirement. The current
+candidate uses the `linux_x86_64` tag and can be installed directly from a wheel
+download. A PyPI release still needs an accepted platform tag and an ABI audit
+against the chosen modern baseline; do not relabel the raw wheel without that
+check. The CUDA 13.2 build and live model smoke have been validated on sm80.
+
+## Reproducing the 17G text-solo export
+
+In an export environment with the pinned ExecuTorch export dependencies, run
+the following from the package checkout.
+
+Check that `"${CUDA_HOME:-/usr/local/cuda-13.2}/bin/nvcc" --version` reports
+CUDA 13.2 before starting. The exporter reads the compiler version after
+writing the PTE and PTD. If that lookup fails, the
+directory can contain binaries without `provenance.json`. Correct `CUDA_HOME`
+and retry with a fresh `--output-dir`. The exporter refuses to overwrite existing
+artifacts.
+
+```sh
+hf download meta-models/Muse-Glimmer-30B-GGUF \
+  Muse-Glimmer-30B-KQuant-17GB-Q4_K_M.gguf \
+  --revision b44f1072cf75e918a1b82a3a17b45c4389b076e7 --local-dir models
+python packaging/export_cuda.py \
+  --checkpoint models/Muse-Glimmer-30B-KQuant-17GB-Q4_K_M.gguf
+```
+
+The exporter verifies the source checksum and writes the PTE, its companion
+PTD, and `provenance.json`. For the cell-layout export with 131072 shared KV
+cells, four live sessions, eight cached prefixes, and four capture slots leave
+8191 tokens per slot after reserving one padding cell.
+
+## Offline manylinux builder
+
+Run `python packaging/build_manylinux.py --prepare-only` on a connected Linux
+x86-64 host. It downloads the CPython 3.11 build wheels, initializes the pinned
+ExecuTorch CUDA submodules, and packages their sources with the STB image and
+resize headers and license from ExecuTorch's CMake pin. To supply a trusted
+local copy of STB, set `MUSE_GLIMMER_STB_INCLUDE_DIR` during preparation.
+Preparation records the Muse-Glimmer source fingerprint and archive checksum.
+Repeat preparation after switching commits or editing the package sources.
+
+With the manylinux image preloaded and CUDA 13.2 installed, run
+`python packaging/build_manylinux.py`. The container builds from the prepared
+archive with networking disabled. Use the same `--wheelhouse` path for both
+commands if you override the default.
 
 ## What is already handled
 
@@ -22,8 +108,8 @@ pipeline. Keep the top-level README limited to working user flows.
 
 1. **Choose and verify the support baseline.** Confirm CPU architecture, actual
    CUDA toolkit version, minimum NVIDIA driver, supported GPU architectures and
-   glibc baseline. `linux-x86_64-cuda-13_2` is a proposed artifact identifier,
-   not a promise of CUDA 13.2 support. Update the coordinator's Linux condition
+   glibc baseline. `linux-x86_64-cuda-13_2` is the validated CUDA baseline's
+   artifact identifier. Update the coordinator's Linux condition
    and runner labels if the final identifier changes.
 2. **Implement the native/package path.** Extend `packaging/build_native.py`,
    `packaging/source.py`, `packaging/stage.py`, `packaging/native/CMakeLists.txt`,
@@ -39,9 +125,9 @@ pipeline. Keep the top-level README limited to working user flows.
    Preserve batching, session behavior, DFlash defaults where supported, and
    useful errors for unsupported drivers/GPUs. The model recipe lives in the
    pinned ExecuTorch submodule; coordinate any pin update for both platforms.
-4. **Replace the fail-closed `linux_wheel.yml` scaffold.** Use `mac_wheel.yml` as
-   the build/test contract, adding the necessary Linux build image/toolchain.
-   Use an appropriate manylinux environment and `auditwheel` where applicable;
+4. **Validate `linux_wheel.yml`.** Use a reproducible modern Linux build
+   image/toolchain and the existing installed-wheel/live-model test contract.
+   Audit the actual ABI and use an accepted wheel tag for PyPI publication;
    changing a filename alone does not establish manylinux compatibility.
 5. **Test on real hardware.** Build from clean sources, install the wheel without
    a compiler or CUDA toolkit, start its native worker, run the full applicable
@@ -77,13 +163,15 @@ structure; validate the Linux/glibc/driver requirements before filling them in):
 {
   "runner": ["self-hosted", "Linux", "X64", "cuda-13_2"],
   "workflow": "linux_wheel.yml",
-  "wheel_tag": "py3-none-manylinux_2_28_x86_64",
+  "wheel_tag": "py3-none-linux_x86_64",
   "description": "NVIDIA CUDA 13.2",
-  "requirements": "REPLACE WITH VERIFIED GLIBC, DRIVER, GPU AND PYTHON REQUIREMENTS"
+  "requirements": "glibc 2.34+, x86-64-v2 CPU, Python 3.11+, NVIDIA driver supporting CUDA 13.2"
 }
 ```
 
-The tag above is illustrative. pip understands OS/architecture/Python tags,
+The tag above describes the direct-download candidate; replace it with the
+validated, PyPI-accepted tag before enabling shared registry publication.
+pip understands OS/architecture/Python tags,
 **not CUDA versions**. Start with one CUDA baseline per Linux architecture;
 two CUDA variants must not produce the same wheel filename or compatibility tag.
 If `auditwheel` emits multiple platform tags, put the full dot-separated tag in
@@ -95,6 +183,8 @@ Use a review branch containing all CUDA changes. Dispatch **one** `wheel.yml`
 run on that branch. Join its run ID from both machines; each downloads its own
 runner archive and receives only matching jobs. The helper preserves CUDA_HOME,
 CUDA_PATH and CUDACXX and adds discoverable `nvcc`/`nvidia-smi` directories to PATH.
+On Linux it also forwards `MUSE_GLIMMER_CXX_RUNTIME_DIR` when the build needs
+a GNU C++ runtime outside the compiler's default library directory.
 Any additional build setup belongs explicitly in `linux_wheel.yml`.
 
 The Mac must remain available for coordination and its own tests. The Linux

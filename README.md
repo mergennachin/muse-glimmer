@@ -2,7 +2,8 @@
 
 Serve [Muse Glimmer 30B](https://ai.meta.com/research/publications/muse-glimmer-30b-an-on-device-agentic-model/) locally. Development preview.
 
-**Supported platforms:** macOS 26.2+ on Apple silicon. Requires Python 3.11+.
+**Supported platforms:** macOS 26.2+ on Apple silicon and Linux x86_64 with CUDA 13.2. Requires Python 3.11+.
+The CUDA model was tested on an 80 GB A100 and exceeds Ada GPUs’ shared-memory limit.
 
 ## Quickstart
 
@@ -12,8 +13,7 @@ muse-glimmer pull 1.0
 muse-glimmer serve
 ```
 
-Uses the 17G DFlash2 model with seven draft proposals. Serves at `http://127.0.0.1:8000`
-with a live terminal HUD. **Ctrl+C** stops it.
+Serves at `http://127.0.0.1:8000` with a live terminal HUD. **Ctrl+C** stops it.
 
 <details>
 <summary>Create a Python environment (Conda or uv)</summary>
@@ -37,11 +37,15 @@ source .venv/bin/activate
 <details>
 <summary>Install from source</summary>
 
-Requires Git and Xcode with the Metal toolchain:
+Linux builds require Git, Make, the CUDA 13.2 toolkit, and a C++ toolchain with a GCC 12+ runtime.
+On macOS, set up Xcode with the Metal toolchain:
 
 ```sh
 sudo xcodebuild -license accept
 xcodebuild -downloadComponent MetalToolchain
+```
+
+```sh
 git clone --recursive https://github.com/mergennachin/muse-glimmer.git
 cd muse-glimmer
 pip install -e .

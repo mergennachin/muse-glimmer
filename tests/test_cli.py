@@ -1,3 +1,4 @@
+import platform
 import socket
 from unittest.mock import Mock
 
@@ -177,6 +178,22 @@ def test_config_file_requires_explicit_selection(tmp_path, monkeypatch):
     assert load_settings({}) == expected
 
 
+@pytest.mark.parametrize(("system", "context", "dflash"), [("Darwin", 16384, True), ("Linux", 8192, False)])
+def test_backend_tables_and_override_precedence(tmp_path, monkeypatch, system, context, dflash):
+    monkeypatch.setattr(platform, "system", lambda: system)
+    assert load_settings({}).dflash is dflash
+    assert load_settings({}, model_defaults={"dflash": not dflash}).dflash is not dflash
+    path = tmp_path / "config.toml"
+    path.write_text(
+        "context = 4096\nport = 8001\n"
+        "[backends.metal]\ncontext = 16384\ndflash = true\n"
+        "[backends.cuda]\ncontext = 8192\ndflash = false\n"
+    )
+    settings = load_settings({}, path, model_defaults={"dflash": not dflash})
+    assert (settings.port, settings.context, settings.dflash) == (8001, context, dflash)
+    assert load_settings({"context": 2048}, path).context == 2048
+
+
 def test_explicit_config_is_preserved_and_model_flag_overrides_it(tmp_path):
     path = tmp_path / "config.toml"
     original = '# My settings\nmodel="/models/saved"\nport=8080\n'
@@ -236,7 +253,7 @@ def test_explicit_file_still_works_in_directory_with_multiple_models(tmp_path, m
     monkeypatch.setattr(runtime, "serve", serve)
     assert main(["serve", "--model", str(selected)]) == 0
     assert serve.call_args.args[0] == selected
-    assert serve.call_args.args[1].dflash is True
+    assert serve.call_args.args[1].dflash is (platform.system() != "Linux")
 
 
 def test_no_dflash_overrides_enabled_config(tmp_path, monkeypatch):
@@ -252,7 +269,10 @@ def test_no_dflash_overrides_enabled_config(tmp_path, monkeypatch):
     assert serve.call_args.args[1].dflash is False
 
 
-@pytest.mark.parametrize("setting", ["port = 0", "concurrency = -1", "unknown = 1"])
+@pytest.mark.parametrize("setting", [
+    "port = 0", "concurrency = -1", "unknown = 1", "backends = 1",
+    "[backends.cdua]\ncontext = 4096", "[backends.cuda]\nunknown = 1",
+])
 def test_invalid_configuration_is_rejected(tmp_path, setting):
     path = tmp_path / "config.toml"
     path.write_text(setting)

@@ -1,6 +1,7 @@
 """Tag wheels containing an executable as platform-specific, without a Python ABI."""
 
 import json
+import platform
 import runpy
 import shutil
 import tomllib
@@ -10,6 +11,7 @@ from setuptools import setup
 from setuptools.command.bdist_wheel import bdist_wheel
 from setuptools.command.build_py import build_py
 from setuptools.command.sdist import sdist
+from setuptools.dist import Distribution
 
 SHARED_DATA = (
     "default_config.toml",
@@ -54,15 +56,23 @@ class BuildPy(build_py):
 
 
 class SourceDist(sdist):
+    user_options = [*sdist.user_options, ("cuda-stb-dir=", None, "include prepared STB headers for an offline CUDA build")]
+
+    def initialize_options(self):
+        super().initialize_options()
+        self.cuda_stb_dir = None
+
     def run(self):
         self.acquisition = runpy.run_path(str(Path(__file__).parent / "packaging/source.py"))
-        self.source = self.acquisition["source_checkout"]()
+        self.source = self.acquisition["source_checkout"](all_backends=self.cuda_stb_dir is None)
         super().run()
 
     def make_release_tree(self, base_dir, files):
         super().make_release_tree(base_dir, files)
         destination = Path(base_dir) / "third-party/executorch"
         self.acquisition["copy_sources"](self.source, destination)
+        if self.cuda_stb_dir:
+            shutil.copytree(self.cuda_stb_dir, destination.parent / "stb")
         # Keep the source archive below PyPI's size limit without dropping build inputs.
         for path in destination.rglob("*"):
             if path.is_file() and (
@@ -75,12 +85,20 @@ class SourceDist(sdist):
         )
 
 
-class MacWheel(bdist_wheel):
+class NativeDistribution(Distribution):
+    def has_ext_modules(self):
+        # Linux native payloads must install into platlib for auditwheel.
+        return platform.system() == "Linux" or super().has_ext_modules()
+
+
+class PlatformWheel(bdist_wheel):
     def finalize_options(self):
         super().finalize_options()
         self.root_is_pure = False
 
     def get_tag(self):
+        if platform.system() == "Linux" and platform.machine() == "x86_64":
+            return "py3", "none", "linux_x86_64"
         # pip uses major-only compatibility tags for macOS 11+.
         major = metadata["tool"]["muse-glimmer"]["macos-deployment-target"].split(".")[0]
         return "py3", "none", f"macosx_{major}_0_arm64"
@@ -99,7 +117,8 @@ readme = readme.replace(
 readme = readme.replace('src="img/', f'src="{repository}/raw/v{version}/img/')
 
 setup(
-    cmdclass={"bdist_wheel": MacWheel, "build_py": BuildPy, "sdist": SourceDist},
+    distclass=NativeDistribution,
+    cmdclass={"bdist_wheel": PlatformWheel, "build_py": BuildPy, "sdist": SourceDist},
     long_description=readme,
     long_description_content_type="text/markdown",
     project_urls={"Repository": repository, "Source": source_url, "Issues": f"{repository}/issues"},

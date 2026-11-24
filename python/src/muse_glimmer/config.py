@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import platform
 import tomllib
 from pathlib import Path
 from typing import Literal
@@ -23,8 +24,25 @@ class Settings(BaseModel):
     dflash_n_draft: int = Field(ge=0)
 
 
+def _read_config(path: Path) -> dict:
+    with path.open("rb") as file:
+        values = tomllib.load(file)
+    groups = values.pop("backends", {})
+    if not isinstance(groups, dict):
+        raise ValueError("Expected [backends.metal] or [backends.cuda] tables")
+    for name, section in groups.items():
+        if name not in {"metal", "cuda"} or not isinstance(section, dict):
+            raise ValueError(f"Invalid backend config {name!r}. Use [backends.metal] or [backends.cuda].")
+        unknown = section.keys() - Settings.model_fields.keys()
+        if unknown:
+            raise ValueError(f"Unknown setting in [backends.{name}]: {', '.join(sorted(unknown))}")
+    backend = "cuda" if platform.system() == "Linux" else "metal"
+    values.update(groups.get(backend, {}))
+    return values
+
+
 def load_defaults() -> dict:
-    return tomllib.loads(resource_path("default_config.toml").read_text())
+    return _read_config(resource_path("default_config.toml"))
 
 
 def load_settings(
@@ -35,6 +53,6 @@ def load_settings(
     if config_path is not None:
         if not config_path.is_file():
             raise ValueError(f"Configuration file does not exist: {config_path}")
-        values.update(tomllib.loads(config_path.read_text()))
+        values.update(_read_config(config_path))
     values.update({key: value for key, value in overrides.items() if value is not None})
     return Settings.model_validate(values)

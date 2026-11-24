@@ -1,18 +1,115 @@
-# CUDA owner: replace this gate with build + installation/full/live tests.
-# See .github/CUDA_RELEASE.md. Absent from release-platforms.json until validated.
 name: Linux CUDA wheel
-
 on:
   workflow_call:
-
+    inputs:
+      coordinated:
+        type: boolean
+        default: true
+      model-path:
+        type: string
+        required: true
 permissions:
   contents: read
-
+env:
+  RELEASE_PLATFORM: linux-x86_64-cuda-13_2
+  CUDA_HOME: /usr/local/cuda-13.2
+  TORCH_CUDA_ARCH_LIST: 8.0 8.6 8.9 9.0 10.0 12.0+PTX
+  CMAKE_BUILD_PARALLEL_LEVEL: '16'
 jobs:
-  pending-cuda:
-    runs-on: [self-hosted, Linux, X64, cuda-13_2, "muse-glimmer-${{ github.run_id }}"]
-    timeout-minutes: 5
+  build:
+    name: Build linux-x86_64-cuda-13_2
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - cuda-13_2
+      - muse-glimmer-${{ github.run_id }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
-      - run: |
-          echo '::error::CUDA wheel build and GPU tests are not implemented. See .github/CUDA_RELEASE.md.'
-          exit 1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9
+        with:
+          version: 0.13.0
+          python-version: '3.11'
+          activate-environment: true
+          enable-cache: false
+      - name: Build CUDA 13.2 wheel
+        env:
+          MUSE_GLIMMER_MODEL_PATH: ${{ inputs.model-path }}
+        run: |
+          if [[ "$MUSE_GLIMMER_MODEL_PATH" != /* ]]; then
+            echo '::error::Supply an absolute CUDA model path or set the MUSE_GLIMMER_CUDA_MODEL_PATH repository variable for tagged releases.'
+            exit 1
+          fi
+          export PATH="$CUDA_HOME/bin:$PATH"
+          nvcc --version
+          uv pip install build
+          python -m build --wheel
+      - name: Record platform artifact
+        run: python packaging/release.py record --platform '${{ env.RELEASE_PLATFORM }}' dist
+        if: inputs.coordinated
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
+        with:
+          subject-path: dist/*.whl
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: muse-glimmer-${{ env.RELEASE_PLATFORM }}
+          path: |
+            dist/*.whl
+            dist/release.json
+            dist/SHA256SUMS
+          if-no-files-found: error
+  test:
+    name: Test linux-x86_64-cuda-13_2 (Python ${{ matrix.python }})
+    needs: build
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - cuda-13_2
+      - muse-glimmer-${{ github.run_id }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python:
+          - '3.11'
+          - '3.13'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9
+        with:
+          version: 0.13.0
+          python-version: ${{ matrix.python }}
+          activate-environment: true
+          enable-cache: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: muse-glimmer-${{ env.RELEASE_PLATFORM }}
+          path: dist
+      - name: Verify binary-only installation
+        run: python packaging/check_wheel.py --install dist/*.whl
+      - name: Install wheel and test dependencies
+        run: |
+          wheels=(dist/*.whl)
+          uv pip install --only-binary=:all: "${wheels[0]}[dev]" patchelf
+      - name: Run full test suite
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: python -m pytest tests -q --junitxml=reports/pytest.xml
+      - name: Smoke test the installed wheel with a live model
+        if: matrix.python == '3.13'
+        run: python packaging/smoke_wheel.py --model "$MUSE_GLIMMER_MODEL_PATH"
+        env:
+          MUSE_GLIMMER_MODEL_PATH: ${{ inputs.model-path }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: test-results-${{ env.RELEASE_PLATFORM }}-${{ matrix.python }}
+          path: reports/
+          if-no-files-found: warn

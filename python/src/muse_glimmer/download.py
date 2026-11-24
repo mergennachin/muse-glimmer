@@ -12,7 +12,7 @@ import yaml
 from huggingface_hub import CacheNotFound, HfApi, hf_hub_download, scan_cache_dir, snapshot_download
 from huggingface_hub.errors import LocalEntryNotFoundError
 from platformdirs import user_data_path
-from pydantic import BaseModel, ConfigDict, TypeAdapter, field_validator
+from pydantic import BaseModel, ConfigDict, TypeAdapter, field_validator, model_validator
 
 from .resources import resource_path
 from .terminal import print_path
@@ -60,11 +60,42 @@ class PulledModel(BaseModel):
     dflash: bool = False
 
 
+class BackendVariants(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    platform: str
+    default_variant: str
+    variants: dict[str, ModelSource]
+
+
 class ModelVersion(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    default_variant: str
+    default_variant: str | dict[str, str]
     variants: dict[str, dict[str, ModelSource]]
+
+    @model_validator(mode="before")
+    @classmethod
+    def read_backend_groups(cls, data):
+        if not isinstance(data, dict) or set(data) != {"backends"}:
+            return data  # Legacy catalogs group platform locations under each variant.
+        groups = TypeAdapter(dict[str, BackendVariants]).validate_python(data["backends"])
+        defaults: dict[str, str] = {}
+        variants: dict[str, dict[str, ModelSource]] = {}
+        for name, group in groups.items():
+            if group.platform in defaults:
+                raise ValueError(f"Multiple backends configured for {group.platform}")
+            if group.default_variant not in group.variants:
+                raise ValueError(f"Unknown default variant {group.default_variant!r} for {name}")
+            defaults[group.platform] = group.default_variant
+            for variant, source in group.variants.items():
+                variants.setdefault(variant, {})[group.platform] = source
+        return {"default_variant": defaults, "variants": variants}
+
+    def default_for(self, target: str) -> str | None:
+        if isinstance(self.default_variant, str):
+            return self.default_variant
+        return self.default_variant.get(target)
 
 
 def _catalog() -> dict[str, ModelVersion]:
@@ -82,15 +113,23 @@ def _model_source(version: str, variant: str | None = None) -> ModelSource:
             f"Unknown model version {version!r}. Available model versions: {', '.join(sorted(versions))}."
         )
     model = versions[version]
+    target = f"{platform.system().lower()}-{platform.machine().lower()}"
     if variant is None:
-        variant = model.default_variant
+        variant = model.default_for(target)
+        if variant is None:
+            supported = {key for sources in model.variants.values() for key in sources}
+            if target in supported:
+                raise ValueError(f"No default variant for {target}. Choose one with --variant.")
+            raise ValueError(
+                f"Model version {version!r} is not supported on this platform ({target}). "
+                f"Supported platforms: {', '.join(sorted(supported))}."
+            )
     if variant not in model.variants:
         raise ValueError(
             f"Unknown variant {variant!r} for model version {version!r}. "
             f"Available variants: {', '.join(sorted(model.variants))}."
         )
     sources = model.variants[variant]
-    target = f"{platform.system().lower()}-{platform.machine().lower()}"
     if target not in sources:
         raise ValueError(
             f"Model version {version!r} variant {variant!r} is not supported on this platform ({target}). "
@@ -194,7 +233,7 @@ def list_models(version: str | None = None) -> None:
             for name in variants:
                 source = model.variants[name][target]
                 local = _local_export(source)
-                labels = ["recommended"] if name == model.default_variant else []
+                labels = ["recommended"] if name == model.default_for(target) else []
                 is_selected = False
                 if local is not None:
                     path, required = local
@@ -228,7 +267,7 @@ def remove_model(version: str | None = None, variant: str | None = None) -> Path
         model, paths = local
     elif selected is not None:
         model = selected.path
-        paths = [model, model.with_name("pos_embed.bin")]
+        paths = [model, model.with_name("pos_embed.bin"), model.with_name("aoti_cuda_blob.ptd")]
     else:
         print("No model selected. Nothing to remove.")
         return None
@@ -293,8 +332,8 @@ def _delete_export(model: Path, paths: set[Path]) -> None:
 
 
 def _export_files(model: str, files: dict[str, int | None]) -> list[str]:
-    positions = str(PurePosixPath(model).with_name("pos_embed.bin"))
-    return [model, positions] if positions in files else [model]
+    companions = [str(PurePosixPath(model).with_name(name)) for name in ("pos_embed.bin", "aoti_cuda_blob.ptd")]
+    return [model, *[name for name in companions if name in files]]
 
 
 def _download_size(names: list[str], files: dict[str, int | None]) -> str:

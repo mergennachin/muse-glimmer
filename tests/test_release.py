@@ -296,6 +296,10 @@ def test_workflow_requires_all_tests_before_publish():
     assert "fromJSON(needs.plan.outputs.build)" in jobs["verify-pypi"]["strategy"]["matrix"]
     assert jobs["mac"]["uses"] == "./.github/workflows/mac_wheel.yml"
     assert jobs["linux"]["uses"] == "./.github/workflows/linux_wheel.yml"
+    assert "cuda-model-path" in workflow["on"]["workflow_dispatch"]["inputs"]
+    assert jobs["linux"]["with"]["model-path"] == "${{ inputs.cuda-model-path || vars.MUSE_GLIMMER_CUDA_MODEL_PATH }}"
+    linux = yaml.load((ROOT / jobs["linux"]["uses"]).read_text(), Loader=yaml.BaseLoader)
+    assert linux["on"]["workflow_call"]["inputs"]["model-path"]["required"] == "true"
     mac = yaml.load((ROOT / ".github/workflows/mac_wheel.yml").read_text(), Loader=yaml.BaseLoader)
     assert mac["jobs"]["test"]["needs"] == "build"
     assert mac["jobs"]["test"]["strategy"]["matrix"]["python"] == ["3.11", "3.13"]

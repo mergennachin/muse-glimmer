@@ -16,6 +16,7 @@ from muse_glimmer.cli import main
 def hub(tmp_path, monkeypatch):
     monkeypatch.setattr(download.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(download.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(download.platform, "mac_ver", lambda: ("26.2", (), "arm64"))
     state = tmp_path / "data" / "default-model"
     monkeypatch.setattr(download, "default_model_file", lambda: state)
     snapshot = tmp_path / "cache" / "snapshots" / ("a" * 40)
@@ -110,11 +111,28 @@ def test_pull_then_serve_uses_downloaded_model(hub, monkeypatch, capsys, variant
     assert serve.call_args.args[1].dflash is dflash
 
 
+def test_linux_1_0_recommends_and_pulls_the_complete_cuda_export(hub, monkeypatch, capsys):
+    monkeypatch.setattr(download.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(download.platform, "machine", lambda: "x86_64")
+    folder = "muse-glimmer-k-quant-17G-128K-text-solo-cuda"
+    filenames = [f"{folder}/{folder}.pte", f"{folder}/aoti_cuda_blob.ptd"]
+    files(hub, *filenames)
+    assert main(["pull", "--list", "1.0"]) == 0
+    listing = capsys.readouterr().out
+    assert f"{folder} [recommended]" in listing and "-metal" not in listing
+    assert main(["pull", "1.0"]) == 0
+    assert [item.args[1] for item in hub.fetch.call_args_list] == filenames
+    revision = hub.api.model_info.call_args.kwargs["revision"]
+    assert len(revision) == 40 and all(c in "0123456789abcdef" for c in revision)
+    assert download.default_model() == download.PulledModel(path=hub.snapshot / filenames[0], dflash=False)
+
+
 @pytest.mark.parametrize(
     ("system", "machine", "variant", "repo", "directory"),
     [
         ("Darwin", "arm64", None, "vision", "vision-metal"),
         ("Darwin", "arm64", "text-solo", "mac", "apple-metal"),
+        ("Linux", "x86_64", None, "linux", "cpu"),
         ("Linux", "x86_64", "text-solo", "linux", "cpu"),
     ],
 )
@@ -124,22 +142,18 @@ def test_model_catalog_selects_variant_and_platform_location(
     catalog = tmp_path / "models.yaml"
     catalog.write_text("""
 "2.0":
-  default_variant: text-image
-  variants:
-    text-solo:
-      darwin-arm64:
-        repo_id: owner/mac
-        revision: mac-v2
-        directory: apple-metal
-      linux-x86_64:
-        repo_id: owner/linux
-        revision: linux-v2
-        directory: cpu
-    text-image:
-      darwin-arm64:
-        repo_id: owner/vision
-        revision: vision-v2
-        directory: vision-metal
+  backends:
+    metal:
+      platform: darwin-arm64
+      default_variant: text-image
+      variants:
+        text-solo: {repo_id: owner/mac, revision: mac-v2, directory: apple-metal}
+        text-image: {repo_id: owner/vision, revision: vision-v2, directory: vision-metal}
+    cuda:
+      platform: linux-x86_64
+      default_variant: text-solo
+      variants:
+        text-solo: {repo_id: owner/linux, revision: linux-v2, directory: cpu}
 """)
     monkeypatch.setattr(download, "resource_path", lambda name: catalog)
     monkeypatch.setattr(download.platform, "system", lambda: system)
@@ -148,7 +162,7 @@ def test_model_catalog_selects_variant_and_platform_location(
         hub,
         "apple-metal/model.pte",
         "cpu/model.pte",
-        "cpu/pos_embed.bin",
+        "cpu/aoti_cuda_blob.ptd",
         "vision-metal/model.pte",
         "vision-metal/pos_embed.bin",
     )
@@ -165,13 +179,25 @@ def test_model_catalog_selects_variant_and_platform_location(
         call(f"owner/{repo}", f"{directory}/model.pte", revision=hub.info.sha, force_download=False)
     ]
     if directory in {"cpu", "vision-metal"}:
+        companion = "aoti_cuda_blob.ptd" if directory == "cpu" else "pos_embed.bin"
         expected.append(
             call(
-                f"owner/{repo}", f"{directory}/pos_embed.bin",
+                f"owner/{repo}", f"{directory}/{companion}",
                 revision=hub.info.sha, force_download=False,
             )
         )
     assert hub.fetch.call_args_list == expected
+    if system == "Linux" and variant is None:
+        serve = Mock()
+        monkeypatch.setattr(runtime, "serve", serve)
+        hub.api.model_info.side_effect = AssertionError("serve must use the selected snapshot offline")
+        assert main(["serve"]) == 0
+        model, settings = serve.call_args.args
+        assert model == hub.snapshot / "cpu/model.pte"
+        assert settings.dflash is False
+        options = runtime.server_options(model, settings)
+        assert options[options.index("--backend") + 1] == "cuda"
+        assert options[options.index("--data-path") + 1] == str(model.with_name("aoti_cuda_blob.ptd"))
 
 
 @pytest.mark.parametrize(
@@ -603,14 +629,15 @@ def cached_export(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("symlink", [False, True])
 @pytest.mark.parametrize("legacy", [False, True])
-def test_remove_deletes_export_but_preserves_other_variants_and_shared_blobs(cached_export, legacy, symlink, capsys):
+@pytest.mark.parametrize("companion", ["pos_embed.bin", "aoti_cuda_blob.ptd"])
+def test_remove_deletes_export_but_preserves_other_variants_and_shared_blobs(cached_export, legacy, symlink, companion, capsys):
     cache = cached_export
     model, model_blob = cache.add("vision/model.pte", "model", symlink=symlink)
-    positions, positions_blob = cache.add("vision/pos_embed.bin", "positions", symlink=symlink)
+    positions, positions_blob = cache.add(f"vision/{companion}", "positions", symlink=symlink)
     other, other_blob = cache.add("solo/model.pte", "other")
     readme, _ = cache.add("vision/README.md", "readme")
     if symlink:
-        shared, _ = cache.add("vision/pos_embed.bin", "positions", revision="b" * 40)
+        shared, _ = cache.add(f"vision/{companion}", "positions", revision="b" * 40)
     cache.state.write_text(str(model) if legacy else download.PulledModel(path=model).model_dump_json())
 
     assert main(["pull", "--remove"]) == 0
