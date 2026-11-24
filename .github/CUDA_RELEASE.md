@@ -1,8 +1,9 @@
 # CUDA release handoff
 
 CUDA 13.2 build and serving support and the Linux workflow are implemented.
-Shared CUDA publication remains disabled pending workflow validation, a PyPI-accepted
-wheel tag, and a revision-pinned CUDA model catalog entry. Use [RELEASING.md](RELEASING.md)
+Shared CUDA wheel publication remains disabled pending workflow validation and a
+PyPI-accepted wheel tag. Model version `1.0` pins the published 17G CUDA text-solo
+export for Linux x86_64. Use [RELEASING.md](RELEASING.md)
 for the manual Linux validation workflow and the shared release pipeline. Keep
 the top-level README limited to working user flows.
 

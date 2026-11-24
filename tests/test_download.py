@@ -111,6 +111,22 @@ def test_pull_then_serve_uses_downloaded_model(hub, monkeypatch, capsys, variant
     assert serve.call_args.args[1].dflash is dflash
 
 
+def test_linux_1_0_recommends_and_pulls_the_complete_cuda_export(hub, monkeypatch, capsys):
+    monkeypatch.setattr(download.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(download.platform, "machine", lambda: "x86_64")
+    folder = "muse-glimmer-k-quant-17G-128K-text-solo-cuda"
+    filenames = [f"{folder}/{folder}.pte", f"{folder}/aoti_cuda_blob.ptd"]
+    files(hub, *filenames)
+    assert main(["pull", "--list", "1.0"]) == 0
+    listing = capsys.readouterr().out
+    assert f"{folder} [recommended]" in listing and "-metal" not in listing
+    assert main(["pull", "1.0"]) == 0
+    assert [item.args[1] for item in hub.fetch.call_args_list] == filenames
+    revision = hub.api.model_info.call_args.kwargs["revision"]
+    assert len(revision) == 40 and all(c in "0123456789abcdef" for c in revision)
+    assert download.default_model() == download.PulledModel(path=hub.snapshot / filenames[0], dflash=False)
+
+
 @pytest.mark.parametrize(
     ("system", "machine", "variant", "repo", "directory"),
     [

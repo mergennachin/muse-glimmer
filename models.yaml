@@ -6,6 +6,16 @@
 # files lists the complete export relative to directory, enabling offline reuse.
 "1.0":
   backends:
+    cuda:
+      platform: linux-x86_64
+      default_variant: muse-glimmer-k-quant-17G-128K-text-solo-cuda
+      variants:
+        muse-glimmer-k-quant-17G-128K-text-solo-cuda:
+          repo_id: SocialLocalMobile/Muse-Glimmer-30B-ExecuTorch-PTE
+          revision: ba91280191bf65c01b324066be05e8755f1754b1
+          directory: muse-glimmer-k-quant-17G-128K-text-solo-cuda
+          files: [muse-glimmer-k-quant-17G-128K-text-solo-cuda.pte, aoti_cuda_blob.ptd]
+          dflash: false
     metal:
       platform: darwin-arm64
       default_variant: muse-glimmer-k-quant-17G-128K-text-dflash2-metal

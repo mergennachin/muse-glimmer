@@ -22,18 +22,16 @@ C++ toolchain with a GCC 12+ runtime.
 
 ```sh
 pip install -e .
+muse-glimmer pull 1.0
+muse-glimmer serve
 ```
 
 If you already have the prebuilt wheel, install it with
 `pip install ./muse_glimmer-*-linux_x86_64.whl`. It targets glibc 2.34+ and x86-64-v2.
 
-Serve a local 17G CUDA text-solo export with its `.pte` and
-`aoti_cuda_blob.ptd` in the same directory. The example uses the 8191-token
-context that fits the shared-cell export with the default server settings.
-
-```sh
-muse-glimmer serve --model /path/to/cuda-export --context 8191
-```
+On Linux x86_64, `pull 1.0` selects the 17G CUDA text-solo export and downloads
+its program and weights (17.89 GB total). `serve` uses that selection and starts
+the server at `http://127.0.0.1:8000`.
 
 <details>
 <summary>Create a Python environment (Conda or uv)</summary>

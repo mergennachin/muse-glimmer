@@ -120,8 +120,8 @@ runs live generation on Python 3.13. It uploads
 `linux_x86_64`, targets glibc 2.34+/x86-64-v2, and bundles the GNU C++ runtime.
 Older-glibc compatibility is outside the initial release scope. Before PyPI
 publication, validate an accepted wheel tag for the chosen modern baseline.
-Shared releases still require the acceptance checks in `CUDA_RELEASE.md` and a
-revision-pinned CUDA model catalog entry. They record manifests and checksums
+Shared releases still require the acceptance checks in `CUDA_RELEASE.md`.
+They record manifests and checksums
 through the coordinator's existing artifact contract.
 
 ## Publish
