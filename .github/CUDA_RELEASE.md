@@ -22,6 +22,24 @@ override. This resolves the model-loading failure caused by the host's older
 also passed. Source builds retain PyTorch 2.15.0+cu132 for code generation and
 native headers; wheel installation and serving do not need PyTorch.
 
+## Known limitations
+
+- **GPU compatibility.** Two prefill kernels in the published 1.0 PTE request
+  147,456 bytes (144 KiB) of dynamic shared memory per block. The `compute_80`
+  PTX fallback retains those launch requirements. They exceed Ada's 99 KiB
+  per-block limit, including on the RTX 6000 Ada. Supporting Ada requires a
+  compatible export and a prefill test on that architecture.
+  [Published export](https://huggingface.co/SocialLocalMobile/Muse-Glimmer-30B-ExecuTorch-PTE/tree/ba91280191bf65c01b324066be05e8755f1754b1/muse-glimmer-k-quant-17G-128K-text-solo-cuda) · [NVIDIA Ada limits](https://docs.nvidia.com/cuda/ada-tuning-guide/index.html#occupancy)
+- **ELF symbol versions.** The wheel checker catches missing library names but
+  can accept a missing symbol version. For example, `ldd` can report
+  `GLIBCXX_3.4.30` missing and still exit successfully. Inspect loader
+  diagnostics and exercise model loading with the bundled C++ runtime.
+- **Release smoke coverage.** Linux CI passes a local model to the smoke helper,
+  which sets `--context 4096`. To check the user quickstart, run
+  `muse-glimmer pull 1.0` followed by `muse-glimmer serve` with the installed
+  wheel. This path passed locally on the A100 with the default 131,072-token
+  context and short prompts. A full-length 128K request remains unverified.
+
 ## Supported Linux baseline
 
 Target modern Linux: glibc 2.34+, x86-64-v2, Python 3.11+, and an NVIDIA driver
@@ -36,6 +54,13 @@ check. The CUDA 13.2 build and live model smoke have been validated on sm80.
 
 In an export environment with the pinned ExecuTorch export dependencies, run
 the following from the package checkout.
+
+Check that `"${CUDA_HOME:-/usr/local/cuda-13.2}/bin/nvcc" --version` reports
+CUDA 13.2 before starting. The exporter reads the compiler version after
+writing the PTE and PTD. If that lookup fails, the
+directory can contain binaries without `provenance.json`. Correct `CUDA_HOME`
+and retry with a fresh `--output-dir`. The exporter refuses to overwrite existing
+artifacts.
 
 ```sh
 hf download meta-models/Muse-Glimmer-30B-GGUF \

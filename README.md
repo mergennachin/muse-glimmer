@@ -2,7 +2,7 @@
 
 Serve [Muse Glimmer 30B](https://ai.meta.com/research/publications/muse-glimmer-30b-an-on-device-agentic-model/) locally. Development preview.
 
-**Platforms:** macOS 26.2+ on Apple silicon, and Linux x86_64 with an NVIDIA GPU and a driver supporting CUDA 13.2. Requires Python 3.11+.
+**Platforms:** macOS 26.2+ on Apple silicon, and Linux x86_64 with an NVIDIA driver supporting CUDA 13.2. The Linux model was tested on an 80 GB A100. Requires Python 3.11+.
 
 ## Quickstart on Apple silicon
 
@@ -16,6 +16,10 @@ Uses the 17G DFlash2 model with seven draft proposals. Serves at `http://127.0.0
 with a live terminal HUD. **Ctrl+C** stops it.
 
 ## Quickstart on Linux with CUDA 13.2
+
+The default model requires 144 KiB of shared memory per thread block during
+prompt processing. Ada GPUs, including the RTX 6000 Ada, have a 99 KiB limit
+and cannot run this export.
 
 From the repository root, install with Git, Make, the CUDA 13.2 toolkit, and a
 C++ toolchain with a GCC 12+ runtime.
