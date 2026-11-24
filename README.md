@@ -1,41 +1,10 @@
 # muse-glimmer
 
-Serve [Muse Glimmer 30B](https://ai.meta.com/research/publications/muse-glimmer-30b-an-on-device-agentic-model/) locally. Development preview.
+Run [Muse Glimmer 30B](https://ai.meta.ai/research/publications/muse-glimmer-30b-an-on-device-agentic-model/) locally with an OpenAI-compatible chat API. Development preview.
 
-**Platforms:** macOS 26.2+ on Apple silicon, and Linux x86_64 with an NVIDIA driver supporting CUDA 13.2. The Linux model was tested on an 80 GB A100. Requires Python 3.11+.
+## Install
 
-## Quickstart on Apple silicon
-
-```sh
-pip install --pre muse-glimmer
-muse-glimmer pull 1.0
-muse-glimmer serve
-```
-
-Uses the 17G DFlash2 model with seven draft proposals. Serves at `http://127.0.0.1:8000`
-with a live terminal HUD. **Ctrl+C** stops it.
-
-## Quickstart on Linux with CUDA 13.2
-
-The default model requires 144 KiB of shared memory per thread block during
-prompt processing. Ada GPUs, including the RTX 6000 Ada, have a 99 KiB limit
-and cannot run this export.
-
-From the repository root, install with Git, Make, the CUDA 13.2 toolkit, and a
-C++ toolchain with a GCC 12+ runtime.
-
-```sh
-pip install -e .
-muse-glimmer pull 1.0
-muse-glimmer serve
-```
-
-If you already have the prebuilt wheel, install it with
-`pip install ./muse_glimmer-*-linux_x86_64.whl`. It targets glibc 2.34+ and x86-64-v2.
-
-On Linux x86_64, `pull 1.0` selects the 17G CUDA text-solo export and downloads
-its program and weights (17.89 GB total). `serve` uses that selection and starts
-the server at `http://127.0.0.1:8000`.
+Use Python 3.11 or newer.
 
 <details>
 <summary>Create a Python environment (Conda or uv)</summary>
@@ -56,6 +25,12 @@ source .venv/bin/activate
 
 </details>
 
+### Apple silicon (macOS 26.2+)
+
+```sh
+pip install --pre muse-glimmer
+```
+
 <details>
 <summary>Build from source on macOS</summary>
 
@@ -70,6 +45,60 @@ pip install -e .
 ```
 
 </details>
+
+### Linux x86_64 (CUDA 13.2)
+
+The default CUDA export was tested on an 80 GB A100. Its prefill kernels need
+144 KiB of shared memory per thread block. Ada GPUs, including the RTX 6000 Ada,
+have a 99 KiB limit and cannot run this export.
+
+If you have the prebuilt wheel, install it from the directory containing the
+download. It requires glibc 2.34+, an x86-64-v2 CPU, and an NVIDIA driver
+supporting CUDA 13.2.
+
+```sh
+pip install ./muse_glimmer-*-linux_x86_64.whl
+```
+
+To build from source, run this from the repository root with Git, Make, the
+CUDA 13.2 toolkit, and a C++ toolchain with a GCC 12+ runtime installed.
+
+```sh
+pip install -e .
+```
+
+## Download and serve
+
+`pull 1.0` selects the 17G DFlash2 model with seven draft proposals on Apple
+silicon and the 17G text-solo model on Linux (17.89 GB download).
+[Model files on Hugging Face](https://huggingface.co/SocialLocalMobile/Muse-Glimmer-30B-ExecuTorch-PTE)
+
+```sh
+muse-glimmer pull 1.0
+muse-glimmer serve
+```
+
+The server listens at `http://127.0.0.1:8000` and shows activity in the terminal.
+
+## Send a chat request
+
+With the server running, try this in a second terminal. For an OpenAI-compatible
+client, use `http://127.0.0.1:8000/v1` as the base URL and `muse-glimmer-30B`
+as the model ID.
+
+```sh
+curl --fail-with-body http://127.0.0.1:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "muse-glimmer-30B",
+    "messages": [{"role": "user", "content": "Say hello."}],
+    "max_tokens": 512,
+    "temperature": 0.7
+  }'
+```
+
+Press **Ctrl+C** in the server terminal when you're done. The `--launch`
+commands below start their own server on the same port.
 
 ## Coding agents
 
@@ -99,26 +128,13 @@ Your browser opens at `http://127.0.0.1:8080`. Chats are saved locally. **Ctrl+C
 
 <img src="img/open-webui-demo.png" alt="Chatting with Muse Glimmer in Open WebUI" width="600">
 
-## Smoke test
-
-With the server running, open another terminal:
-
-```sh
-curl --fail-with-body http://127.0.0.1:8000/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "model": "muse-glimmer-30B",
-    "messages": [{"role": "user", "content": "Say hello."}],
-    "max_tokens": 512,
-    "temperature": 0.7
-  }'
-```
-
 ## Options
 
-For model selection, downloads, and server options:
+Use `pull --list` to see the recommended, downloaded, and selected variants
+for your machine.
 
 ```sh
+muse-glimmer pull --list
 muse-glimmer pull --help
 muse-glimmer serve --help
 ```
