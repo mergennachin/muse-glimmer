@@ -116,6 +116,7 @@ def test_pull_then_serve_uses_downloaded_model(hub, monkeypatch, capsys, variant
     [
         ("Darwin", "arm64", None, "vision", "vision-metal"),
         ("Darwin", "arm64", "text-solo", "mac", "apple-metal"),
+        ("Linux", "x86_64", None, "linux", "cpu"),
         ("Linux", "x86_64", "text-solo", "linux", "cpu"),
     ],
 )
@@ -125,22 +126,18 @@ def test_model_catalog_selects_variant_and_platform_location(
     catalog = tmp_path / "models.yaml"
     catalog.write_text("""
 "2.0":
-  default_variant: text-image
-  variants:
-    text-solo:
-      darwin-arm64:
-        repo_id: owner/mac
-        revision: mac-v2
-        directory: apple-metal
-      linux-x86_64:
-        repo_id: owner/linux
-        revision: linux-v2
-        directory: cpu
-    text-image:
-      darwin-arm64:
-        repo_id: owner/vision
-        revision: vision-v2
-        directory: vision-metal
+  backends:
+    metal:
+      platform: darwin-arm64
+      default_variant: text-image
+      variants:
+        text-solo: {repo_id: owner/mac, revision: mac-v2, directory: apple-metal}
+        text-image: {repo_id: owner/vision, revision: vision-v2, directory: vision-metal}
+    cuda:
+      platform: linux-x86_64
+      default_variant: text-solo
+      variants:
+        text-solo: {repo_id: owner/linux, revision: linux-v2, directory: cpu}
 """)
     monkeypatch.setattr(download, "resource_path", lambda name: catalog)
     monkeypatch.setattr(download.platform, "system", lambda: system)
@@ -174,6 +171,17 @@ def test_model_catalog_selects_variant_and_platform_location(
             )
         )
     assert hub.fetch.call_args_list == expected
+    if system == "Linux" and variant is None:
+        serve = Mock()
+        monkeypatch.setattr(runtime, "serve", serve)
+        hub.api.model_info.side_effect = AssertionError("serve must use the selected snapshot offline")
+        assert main(["serve"]) == 0
+        model, settings = serve.call_args.args
+        assert model == hub.snapshot / "cpu/model.pte"
+        assert settings.dflash is False
+        options = runtime.server_options(model, settings)
+        assert options[options.index("--backend") + 1] == "cuda"
+        assert options[options.index("--data-path") + 1] == str(model.with_name("aoti_cuda_blob.ptd"))
 
 
 @pytest.mark.parametrize(
