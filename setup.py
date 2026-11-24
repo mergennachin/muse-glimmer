@@ -56,15 +56,23 @@ class BuildPy(build_py):
 
 
 class SourceDist(sdist):
+    user_options = [*sdist.user_options, ("cuda-stb-dir=", None, "include prepared STB headers for an offline CUDA build")]
+
+    def initialize_options(self):
+        super().initialize_options()
+        self.cuda_stb_dir = None
+
     def run(self):
         self.acquisition = runpy.run_path(str(Path(__file__).parent / "packaging/source.py"))
-        self.source = self.acquisition["source_checkout"](all_backends=True)
+        self.source = self.acquisition["source_checkout"](all_backends=self.cuda_stb_dir is None)
         super().run()
 
     def make_release_tree(self, base_dir, files):
         super().make_release_tree(base_dir, files)
         destination = Path(base_dir) / "third-party/executorch"
         self.acquisition["copy_sources"](self.source, destination)
+        if self.cuda_stb_dir:
+            shutil.copytree(self.cuda_stb_dir, destination.parent / "stb")
         # Keep the source archive below PyPI's size limit without dropping build inputs.
         for path in destination.rglob("*"):
             if path.is_file() and (

@@ -49,6 +49,20 @@ PTD, and `provenance.json`. For the cell-layout export with 131072 shared KV
 cells, four live sessions, eight cached prefixes, and four capture slots leave
 8191 tokens per slot after reserving one padding cell.
 
+## Offline manylinux builder
+
+Run `python packaging/build_manylinux.py --prepare-only` on a connected Linux
+x86-64 host. It downloads the CPython 3.11 build wheels, initializes the pinned
+ExecuTorch CUDA submodules, and packages their sources with the STB image and
+resize headers and license from ExecuTorch's CMake pin. To supply a trusted
+local copy of STB, set `MUSE_GLIMMER_STB_INCLUDE_DIR` during preparation.
+Repeat preparation after changing the sources.
+
+With the manylinux image preloaded and CUDA 13.2 installed, run
+`python packaging/build_manylinux.py`. The container builds from the prepared
+archive with networking disabled. Use the same `--wheelhouse` path for both
+commands if you override the default.
+
 ## What is already handled
 
 - One version/tag and source commit for every platform.

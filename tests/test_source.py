@@ -156,7 +156,8 @@ def test_editable_snapshot_includes_local_changes_and_excludes_builds(acquisitio
         module.source_checkout()
 
 
-def test_sdist_roundtrip_without_git(acquisition, tmp_path):
+@pytest.mark.parametrize("offline_cuda", [False, True])
+def test_sdist_roundtrip_without_git(acquisition, tmp_path, offline_cuda):
     module, origin, pin = acquisition
     root = Path(__file__).resolve().parents[1]
     for name in [
@@ -179,10 +180,14 @@ def test_sdist_roundtrip_without_git(acquisition, tmp_path):
     expected = {"repository": str(origin), "revision": pin}
     environment = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
     project = module.ROOT
+    stb = tmp_path / "stb"
+    stb.mkdir()
+    (stb / "stb_image.h").write_text("prepared header")
     for iteration in range(2):
         output = tmp_path / f"dist-{iteration}"
         result = subprocess.run(
-            [sys.executable, "setup.py", "sdist", "--dist-dir", str(output)],
+            [sys.executable, "setup.py", "sdist", "--dist-dir", str(output),
+             *(["--cuda-stb-dir", str(stb)] if offline_cuda else [])],
             cwd=project,
             env=environment,
             capture_output=True,
@@ -198,6 +203,9 @@ def test_sdist_roundtrip_without_git(acquisition, tmp_path):
         assert not (project / module.SUBMODULE / "model.pte").exists()
         assert (project / "models.yaml").read_bytes() == (root / "models.yaml").read_bytes()
         assert json.loads((project / "third-party/executorch-source.json").read_text()) == expected
+        if offline_cuda:
+            stb = project / "third-party/stb"
+            assert (stb / "stb_image.h").read_text() == "prepared header"
         acquisition_from_archive = runpy.run_path(str(project / "packaging/source.py"))
         assert acquisition_from_archive["source_checkout"]() == project / module.SUBMODULE
     (project / "third-party/executorch-source.json").unlink()

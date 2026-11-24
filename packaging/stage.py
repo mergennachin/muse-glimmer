@@ -20,6 +20,24 @@ REWRITES = {
 }
 
 
+def gcc_runtime_notices(openmp: bool, share: Path = Path("/usr/share")) -> list[str]:
+    components = "libstdc++, libgcc" + (", libgomp" if openmp else "")
+    # GCC's runtime libraries share GPLv3 with the GCC Runtime Library Exception.
+    # RPMs can install the complete license pair with libgcc instead of libgomp.
+    files = [ROOT / "packaging/licenses" / name for name in ("GCC-COPYING3", "GCC-RUNTIME-EXCEPTION")]
+    if openmp:
+        for package in ("libgomp", "libgcc", "gcc"):
+            directory = share / "licenses" / package
+            pair = [directory / name for name in ("COPYING3", "COPYING.RUNTIME")]
+            if all(path.is_file() for path in pair):
+                files = pair
+                break
+        debian_notice = share / "doc/libgomp1/copyright"
+        if debian_notice.is_file():
+            files.append(debian_notice)
+    return [f"--- GNU runtime ({components})/{path.name} ---\n\n{path.read_text()}\n" for path in files]
+
+
 def stage(source: Path, worker_dir: Path, *, editable: bool = False) -> None:
     # Validate the entire replacement before touching an existing editable install.
     with tempfile.TemporaryDirectory(prefix=".stage-", dir=PACKAGE) as temporary:
@@ -152,18 +170,6 @@ def _stage(source: Path, worker_dir: Path, package: Path, *, editable: bool) -> 
         if not eula.is_file():
             raise ValueError(f"Missing CUDA redistribution license: {eula}")
         notices.append(f"--- CUDA Toolkit EULA ---\n\n{eula.read_text()}\n")
-        if (native / "libgomp.so.1").is_file():
-            copyright = Path("/usr/share/doc/libgomp1/copyright")
-            if not copyright.is_file():
-                raise ValueError(f"Missing OpenMP runtime license: {copyright}")
-            notices.append(f"--- GNU OpenMP runtime ---\n\n{copyright.read_text()}\n")
-        # libstdc++ and libgcc are private worker dependencies. AOTI model
-        # libraries loaded later also resolve this already-loaded runtime.
-        licenses = ROOT / "packaging/licenses"
-        for name in ("GCC-COPYING3", "GCC-RUNTIME-EXCEPTION"):
-            path = licenses / name
-            if not path.is_file():
-                raise ValueError(f"Missing bundled GCC runtime license: {path}")
-            notices.append(f"--- GNU C++/GCC runtime {name} ---\n\n{path.read_text()}\n")
+        notices.extend(gcc_runtime_notices((native / "libgomp.so.1").is_file()))
     (native / "THIRD_PARTY_NOTICES").write_text("\n".join(notices))
     return revision

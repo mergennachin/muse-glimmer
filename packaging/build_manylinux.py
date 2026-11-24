@@ -1,13 +1,16 @@
-"""Build a CUDA wheel offline in a preloaded manylinux container and audit it."""
+"""Prepare build inputs online, then build the CUDA wheel in an offline container."""
 
 from __future__ import annotations
 
 import argparse
 import os
 import platform
-import shlex
+import re
+import runpy
+import shutil
 import subprocess
 import sys
+import tempfile
 import tomllib
 from pathlib import Path
 
@@ -16,82 +19,112 @@ IMAGE = "quay.io/pypa/manylinux_2_28_x86_64"
 TAG = "manylinux_2_28_x86_64"
 
 
+def prepare_stb(recipe: Path, dest: Path) -> None:
+    override = os.environ.get("MUSE_GLIMMER_STB_INCLUDE_DIR")
+    if override:
+        source = Path(override).resolve()
+    else:
+        # Follow the same immutable FetchContent revision as the pinned ExecuTorch recipe.
+        match = re.search(
+            r"FetchContent_Declare\(\s*stb\s+GIT_REPOSITORY\s+(\S+)\s+GIT_TAG\s+([a-f0-9]{40})\s*\)",
+            recipe.read_text(),
+        )
+        if not match:
+            raise RuntimeError(f"Could not identify the pinned STB source in {recipe}")
+        url, revision = match.groups()
+        source = dest.parent / "stb-checkout"
+        subprocess.run(["git", "init", "-q", str(source)], check=True)
+        subprocess.run(["git", "-C", str(source), "fetch", "--depth=1", "--no-tags", url, revision], check=True)
+        subprocess.run(["git", "-C", str(source), "checkout", "--quiet", "--detach", revision], check=True)
+
+    # CMake accepts both upstream's deprecated/ layout and a flat include directory.
+    resize = source / "deprecated/stb_image_resize.h"
+    if not resize.is_file():
+        resize = source / "stb_image_resize.h"
+    dest.mkdir()
+    for path in (source / "stb_image.h", resize, source / "LICENSE"):
+        shutil.copyfile(path, dest / path.name)
+
+
+def source_archive(wheelhouse: Path) -> Path:
+    version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
+    revision = runpy.run_path(str(ROOT / "packaging/source.py"))["source_metadata"]()["revision"]
+    return wheelhouse / revision / f"muse_glimmer-{version}.tar.gz"
+
+
 def prepare(wheelhouse: Path) -> None:
     requirements = tomllib.loads((ROOT / "pyproject.toml").read_text())["build-system"]["requires"]
-    requirements = ["torch==2.15.0+cu132" if item == "torch==2.15.0" else item for item in requirements]
     wheelhouse.mkdir(parents=True, exist_ok=True)
     command = [
         sys.executable, "-m", "pip", "download", "--only-binary=:all:",
         "--implementation", "cp", "--python-version", "3.11", "--abi", "cp311",
-        "--extra-index-url", "https://download.pytorch.org/whl/test/cu132",
         "--dest", str(wheelhouse),
     ]
     for minor in range(28, 16, -1):
         command.extend(["--platform", f"manylinux_2_{minor}_x86_64"])
-    command.extend(["--platform", "manylinux2014_x86_64", "build>=1.2,<2", *requirements])
-    subprocess.run(command, check=True)
+    for legacy in ("manylinux2014", "manylinux2010", "manylinux1"):
+        command.extend(["--platform", f"{legacy}_x86_64"])
+    subprocess.run([*command, "build>=1.2,<2", *requirements], check=True)
+
+    archive = source_archive(wheelhouse)
+    archive.parent.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=archive.parent) as tmp:
+        stage = Path(tmp)
+        source = runpy.run_path(str(ROOT / "packaging/source.py"))["source_checkout"]()
+        prepare_stb(source / "examples/models/muse-glimmer/CMakeLists.txt", stage / "stb")
+        env = stage / "env"
+        subprocess.run([sys.executable, "-m", "venv", str(env)], check=True)
+        python = str(env / "bin/python")
+        subprocess.run([python, "-m", "pip", "install", "--no-index", "--find-links", str(wheelhouse),
+                        "setuptools>=77", "wheel>=0.45"], check=True)
+        subprocess.run([python, "setup.py", "sdist", "--cuda-stb-dir", str(stage / "stb"),
+                        "--dist-dir", str(stage)], cwd=ROOT, check=True)
+        (stage / archive.name).replace(archive)
 
 
 def build(image: str, wheelhouse: Path, output: Path) -> None:
     if (platform.system(), platform.machine()) != ("Linux", "x86_64"):
         raise RuntimeError("The manylinux CUDA builder requires Linux x86_64.")
+    archive = source_archive(wheelhouse)
+    if not archive.is_file() or not list(wheelhouse.glob("torch-*.whl")):
+        raise RuntimeError("Run --prepare-only to stage the build wheels, pinned ExecuTorch sources and STB.")
     subprocess.run(["podman", "image", "exists", image], check=True)
-    if not list(wheelhouse.glob("torch-2.15.0+cu132-*.whl")):
-        raise RuntimeError("Prepare the CPython 3.11 CUDA 13.2 wheelhouse first.")
     output.mkdir(parents=True, exist_ok=True)
     if list(output.glob("*.whl")):
         raise RuntimeError(f"Wheel output must be empty: {output}")
-    raw = ROOT / "build/manylinux/raw"
-    raw.mkdir(parents=True, exist_ok=True)
-    if list(raw.glob("*.whl")):
-        raise RuntimeError(f"Raw wheel output must be empty: {raw}")
     toolkit = Path(os.environ.get("CUDA_HOME", "/usr/local/cuda-13.2")).resolve()
     if not (toolkit / "bin/nvcc").is_file():
         raise RuntimeError(f"CUDA toolkit not found: {toolkit}")
-    mounts = {ROOT.parent: ROOT.parent}
-    # Preserve local Git object alternates and submodule URLs in this workspace.
-    aliases = subprocess.run(
-        ["git", "-C", str(ROOT), "config", "--local", "--get-regexp", r"submodule\..*\.url"],
-        capture_output=True, text=True,
-    )
-    for line in aliases.stdout.splitlines():
-        value = line.split(" ", 1)[1]
-        if value.startswith("/"):
-            alias = Path(value).parent
-            if alias.is_dir() and alias.resolve() == ROOT.parent:
-                mounts[alias] = ROOT.parent
+    cache = ROOT / "build/manylinux/native-cache"
+    cache.mkdir(parents=True, exist_ok=True)
     command = [
         "podman", "run", "--rm", "--pull=never", "--network=none",
-        "--userns=keep-id", "--security-opt", "label=disable",
-        "--workdir", str(ROOT),
+        "--userns=keep-id", "--security-opt", "label=disable", "--workdir", "/tmp",
         "--volume", f"{toolkit}:/usr/local/cuda-13.2:ro",
+        "--volume", f"{wheelhouse}:/inputs/wheels:ro",
+        "--volume", f"{archive}:/inputs/{archive.name}:ro",
+        "--volume", f"{cache}:/native-cache:rw",
+        "--volume", f"{output}:/output:rw",
+        "--env", "CUDA_HOME=/usr/local/cuda-13.2",
+        "--env", "MUSE_GLIMMER_STB_INCLUDE_DIR=/tmp/source/third-party/stb",
+        "--env", "MUSE_GLIMMER_BUILD_CACHE=/native-cache",
+        "--env", "TORCH_CUDA_ARCH_LIST=" + os.environ.get("TORCH_CUDA_ARCH_LIST", "8.0 8.6 8.9 9.0 10.0 12.0+PTX"),
+        "--env", "CMAKE_BUILD_PARALLEL_LEVEL=" + os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL", "8"),
     ]
-    for destination, source in mounts.items():
-        command.extend(["--volume", f"{source}:{destination}:rw"])
-    cache = ROOT / "build/manylinux/native-cache"
-    env = {
-        "CUDA_HOME": "/usr/local/cuda-13.2",
-        "TORCH_CUDA_ARCH_LIST": os.environ.get("TORCH_CUDA_ARCH_LIST", "8.0 8.6 8.9 9.0 10.0 12.0+PTX"),
-        "CMAKE_BUILD_PARALLEL_LEVEL": os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL", "8"),
-        "MUSE_GLIMMER_BUILD_CACHE": str(cache),
-    }
-    for name in ("MUSE_GLIMMER_STB_INCLUDE_DIR", "MUSE_GLIMMER_CXX_RUNTIME_DIR"):
-        if os.environ.get(name):
-            env[name] = os.environ[name]
-    for name, value in env.items():
-        command.extend(["--env", f"{name}={value}"])
-    quote = shlex.quote
-    script = "\n".join([
-        "set -eu",
-        'export PATH="$CUDA_HOME/bin:$PATH"',
-        "/opt/python/cp311-cp311/bin/python -m venv /tmp/muse-glimmer-build-env",
-        f"/tmp/muse-glimmer-build-env/bin/python -m pip install --no-index --only-binary=:all: --find-links {quote(str(wheelhouse))} "
-        "build setuptools wheel 'cmake<4' pyyaml 'torch==2.15.0+cu132' patchelf",
-        'export PATH="/tmp/muse-glimmer-build-env/bin:$PATH"',
-        f"python -m build --wheel --no-isolation --outdir {quote(str(raw))}",
-        f"auditwheel repair --plat {TAG} --only-plat --wheel-dir {quote(str(output))} {quote(str(raw))}/*.whl",
-    ])
-    subprocess.run([*command, image, "/bin/bash", "-c", script], check=True)
+    runtime = os.environ.get("MUSE_GLIMMER_CXX_RUNTIME_DIR")
+    if runtime:
+        command.extend(["--volume", f"{Path(runtime).resolve()}:/inputs/cxx-runtime:ro",
+                        "--env", "MUSE_GLIMMER_CXX_RUNTIME_DIR=/inputs/cxx-runtime"])
+    script = """set -eu
+export PATH="$CUDA_HOME/bin:$PATH"
+/opt/python/cp311-cp311/bin/python -m venv /tmp/build-env
+export PATH="/tmp/build-env/bin:$PATH"
+mkdir -p /tmp/source
+tar -xzf "$1" --strip-components=1 -C /tmp/source
+python -m pip wheel --no-index --find-links /inputs/wheels --no-deps --wheel-dir /tmp/raw /tmp/source
+auditwheel repair --plat "$2" --only-plat --wheel-dir /output /tmp/raw/*.whl
+"""
+    subprocess.run([*command, image, "/bin/bash", "-c", script, "build", f"/inputs/{archive.name}", TAG], check=True)
     wheels = list(output.glob(f"*-{TAG}.whl"))
     if len(wheels) != 1:
         raise RuntimeError("Expected exactly one audited manylinux wheel")
@@ -103,7 +136,7 @@ if __name__ == "__main__":
     parser.add_argument("--image", default=IMAGE)
     parser.add_argument("--wheelhouse", type=Path, default=ROOT / "build/manylinux/wheelhouse")
     parser.add_argument("--output", type=Path, default=ROOT / "dist/manylinux")
-    parser.add_argument("--prepare-only", action="store_true", help="Download build wheels without starting the container")
+    parser.add_argument("--prepare-only", action="store_true", help="Fetch Python wheels, ExecuTorch sources and STB before the offline build")
     args = parser.parse_args()
     if args.prepare_only:
         prepare(args.wheelhouse.resolve())
