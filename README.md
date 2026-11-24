@@ -7,9 +7,6 @@ The CUDA model was tested on an 80 GB A100 and exceeds Ada GPUs’ shared-memory
 
 ## Quickstart
 
-Until the CUDA wheel is published on PyPI, replace the first command on Linux with
-`pip install -e .` from this checkout or `pip install ./muse_glimmer-*-linux_x86_64.whl` for a downloaded wheel.
-
 ```sh
 pip install --pre muse-glimmer
 muse-glimmer pull 1.0
