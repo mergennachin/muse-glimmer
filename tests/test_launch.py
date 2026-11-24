@@ -103,7 +103,9 @@ else:
     url = sys.argv[sys.argv.index("--base-url") + 1] if client == "hermes" else config["baseUrl"] if config else os.environ["OPENROUTER_BASE_URL"]
 with urllib.request.urlopen(url.removesuffix("/v1") + "/health", timeout=2) as response:
     assert response.status == 200
-(root / f"{client}.json").write_text(json.dumps({
+marker = root / f"{client}.json"
+pending = marker.with_suffix(".tmp")
+pending.write_text(json.dumps({
     "pid": os.getpid(), "args": sys.argv[1:], "cwd": os.getcwd(),
     "url": url, "key": os.environ["OPENROUTER_API_KEY"],
     "config": config,
@@ -111,6 +113,7 @@ with urllib.request.urlopen(url.removesuffix("/v1") + "/health", timeout=2) as r
     "openai_key": os.environ.get("OPENAI_API_KEY"),
     "openai_url": os.environ.get("OPENAI_BASE_URL"),
 }))
+pending.replace(marker)
 if os.environ["LAUNCH_TEST_MODE"] == "exit":
     raise SystemExit(7)
 if os.environ["LAUNCH_TEST_MODE"] == "crash":

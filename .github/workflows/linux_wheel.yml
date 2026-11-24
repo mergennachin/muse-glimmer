@@ -47,8 +47,11 @@ jobs:
           fi
           export PATH="$CUDA_HOME/bin:$PATH"
           nvcc --version
-          uv pip install build
-          python -m build --wheel
+          uv pip install build auditwheel==6.8.2
+          python -m build --wheel --outdir build/raw-wheel
+          # check_wheel enforces our documented x86-64-v2 CPU baseline.
+          auditwheel repair --plat manylinux_2_34_x86_64 --only-plat --disable-isa-ext-check --wheel-dir dist build/raw-wheel/*.whl
+          python packaging/check_wheel.py dist/*.whl
       - name: Record platform artifact
         run: python packaging/release.py record --platform '${{ env.RELEASE_PLATFORM }}' dist
         if: inputs.coordinated

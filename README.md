@@ -2,7 +2,7 @@
 
 Serve [Muse Glimmer 30B](https://ai.meta.com/research/publications/muse-glimmer-30b-an-on-device-agentic-model/) locally. Development preview.
 
-**Supported platforms:** macOS 26.2+ on Apple silicon and Linux x86_64 with CUDA 13.2. Requires Python 3.11+.
+**Supported platforms:** macOS 26.2+ on Apple silicon and Linux with glibc 2.34+, an x86-64-v2 CPU, and an NVIDIA driver supporting CUDA 13.2. Requires Python 3.11+.
 The CUDA model was tested on an 80 GB A100 and exceeds Ada GPUs’ shared-memory limit.
 
 ## Quickstart

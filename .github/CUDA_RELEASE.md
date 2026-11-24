@@ -1,8 +1,8 @@
 # CUDA release handoff
 
 CUDA 13.2 build and serving support and the Linux workflow are implemented.
-Shared CUDA wheel publication remains disabled pending workflow validation and a
-PyPI-accepted wheel tag. Model version `1.0` pins the published 17G CUDA text-solo
+Shared releases require both Mac and CUDA wheels. The Linux workflow audits
+the native payload and emits a `manylinux_2_34_x86_64` wheel. Model version `1.0` pins the published 17G CUDA text-solo
 export for Linux x86_64. Use [RELEASING.md](RELEASING.md)
 for the manual Linux validation workflow and the shared release pipeline. Keep
 the top-level README limited to working user flows.
@@ -44,11 +44,13 @@ native headers; wheel installation and serving do not need PyTorch.
 
 Target modern Linux: glibc 2.34+, x86-64-v2, Python 3.11+, and an NVIDIA driver
 supporting CUDA 13.2. Older-glibc support is outside the initial release scope;
-rebuilding against manylinux_2_28 is not an acceptance requirement. The current
-candidate uses the `linux_x86_64` tag and can be installed directly from a wheel
-download. A PyPI release still needs an accepted platform tag and an ABI audit
-against the chosen modern baseline; do not relabel the raw wheel without that
-check. The CUDA 13.2 build and live model smoke have been validated on sm80.
+rebuilding against manylinux_2_28 is not an acceptance requirement. The Linux workflow audits a raw `linux_x86_64` wheel and repairs it to
+`manylinux_2_34_x86_64` before recording, attesting, or testing it.
+Auditwheel's default ISA check assumes x86-64-v1, so the workflow disables that
+check and uses `check_wheel.py` to enforce the documented x86-64-v2 maximum.
+The platform tag encodes the glibc ABI; users must also meet the documented CPU
+and GPU requirements. The CUDA 13.2 build and live model smoke have been
+validated on sm80.
 
 ## Reproducing the 17G text-solo export
 
@@ -145,7 +147,9 @@ commands if you override the default.
 Within `linux_wheel.yml`, build exactly one wheel and record it:
 
 ```sh
-python -m build --wheel
+python -m build --wheel --outdir build/raw-wheel
+auditwheel repair --plat manylinux_2_34_x86_64 --only-plat --disable-isa-ext-check --wheel-dir dist build/raw-wheel/*.whl
+python packaging/check_wheel.py dist/*.whl
 python packaging/release.py record --platform linux-x86_64-cuda-13_2 dist
 ```
 
@@ -163,14 +167,13 @@ structure; validate the Linux/glibc/driver requirements before filling them in):
 {
   "runner": ["self-hosted", "Linux", "X64", "cuda-13_2"],
   "workflow": "linux_wheel.yml",
-  "wheel_tag": "py3-none-linux_x86_64",
+  "wheel_tag": "py3-none-manylinux_2_34_x86_64",
   "description": "NVIDIA CUDA 13.2",
   "requirements": "glibc 2.34+, x86-64-v2 CPU, Python 3.11+, NVIDIA driver supporting CUDA 13.2"
 }
 ```
 
-The tag above describes the direct-download candidate; replace it with the
-validated, PyPI-accepted tag before enabling shared registry publication.
+The tag above is produced only after the ABI audit and CPU baseline check.
 pip understands OS/architecture/Python tags,
 **not CUDA versions**. Start with one CUDA baseline per Linux architecture;
 two CUDA variants must not produce the same wheel filename or compatibility tag.

@@ -170,6 +170,8 @@ def run(run_id: int, labels: list[str] | None = None) -> int:
                 for key in (
                     "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TMPDIR", "DEVELOPER_DIR",
                     "CUDA_HOME", "CUDA_PATH", "CUDACXX",
+                    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+                    "http_proxy", "https_proxy", "no_proxy",
                 )
                 if key in os.environ
             }

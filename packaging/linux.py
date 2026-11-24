@@ -57,6 +57,14 @@ def check_elf(binary: Path, *, bundled: bool = False) -> None:
     header = subprocess.check_output(["readelf", "-h", str(binary)], text=True)
     if "Advanced Micro Devices X86-64" not in header or "ELF64" not in header:
         raise ValueError(f"Expected an x86_64 ELF binary: {binary}")
+    notes = subprocess.check_output(["readelf", "--notes", str(binary)], text=True)
+    isa = re.findall(r"x86 ISA needed: ([^\n]+)", notes)
+    if any(re.search(r"x86-64-v[3-9]", value) for value in isa):
+        raise ValueError(f"Native payload exceeds the x86-64-v2 CPU baseline: {binary}")
+    # Older readelf versions print GNU_PROPERTY_X86_ISA_1_NEEDED as raw bytes.
+    for value in re.findall(r"type 0xc0008002 data: ([0-9a-fA-F ]+)", notes):
+        if int.from_bytes(bytes.fromhex(value), "little") & ~3:
+            raise ValueError(f"Native payload exceeds the x86-64-v2 CPU baseline: {binary}")
     libraries = dependencies(binary, isolated=bundled)
     if bundled:
         for name, path in libraries.items():

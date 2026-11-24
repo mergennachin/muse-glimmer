@@ -5,5 +5,12 @@
     "wheel_tag": "py3-none-macosx_26_0_arm64",
     "description": "Apple Silicon, Metal",
     "requirements": "macOS 26.2+, Python 3.11+"
+  },
+  "linux-x86_64-cuda-13_2": {
+    "runner": ["self-hosted", "Linux", "X64", "cuda-13_2"],
+    "workflow": "linux_wheel.yml",
+    "wheel_tag": "py3-none-manylinux_2_34_x86_64",
+    "description": "NVIDIA CUDA 13.2",
+    "requirements": "glibc 2.34+, x86-64-v2 CPU, Python 3.11+, CUDA 13.2 driver; model validated on 80 GB A100, incompatible with Ada"
   }
 }

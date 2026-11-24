@@ -104,8 +104,13 @@ def test_runner_cleanup(tmp_path, monkeypatch, runner_module, outcome, host, arc
     children = []
     popen = subprocess.Popen
     monkeypatch.setenv("MUSE_GLIMMER_CXX_RUNTIME_DIR", str(tmp_path / "gcc-runtime"))
+    monkeypatch.setenv("https_proxy", "http://proxy.example:8080")
+    monkeypatch.setenv("no_proxy", "localhost,127.0.0.1")
 
     def start(*args, **kwargs):
+        if args[0] == ["./run.sh"]:
+            assert kwargs["env"]["https_proxy"] == "http://proxy.example:8080"
+            assert kwargs["env"]["no_proxy"] == "localhost,127.0.0.1"
         if args[0] == ["./run.sh"] and host == "Linux":
             assert kwargs["env"]["MUSE_GLIMMER_CXX_RUNTIME_DIR"] == str(tmp_path / "gcc-runtime")
         child = popen(*args, **kwargs)

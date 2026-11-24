@@ -62,6 +62,31 @@ def test_macos_keeps_mlx_and_dflash_defaults(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(platform.system() != "Linux", reason="ELF test")
+@pytest.mark.parametrize("isa", [2, 4])
+def test_native_payload_enforces_x86_64_v2_baseline(tmp_path, isa):
+    for tool in ("gcc", "readelf", "ldd"):
+        if not shutil.which(tool):
+            pytest.skip(f"{tool} required for native packaging test")
+    source = tmp_path / "worker.c"
+    source.write_text("int main(void) { return 0; }\n")
+    note = tmp_path / "isa.S"
+    note.write_text(
+        '.section .note.gnu.property,"a"\n.p2align 3\n'
+        '.long 4,16,5\n.asciz "GNU"\n.p2align 3\n'
+        f'.long 0xc0008002,4,{isa},0\n'
+        '.section .note.GNU-stack,"",@progbits\n'
+    )
+    binary = tmp_path / "worker"
+    subprocess.run(["gcc", str(source), str(note), "-o", str(binary)], check=True)
+    check = runpy.run_path(str(ROOT / "packaging/linux.py"))["check_elf"]
+    if isa == 2:
+        check(binary)
+    else:
+        with pytest.raises(ValueError, match="exceeds the x86-64-v2 CPU baseline"):
+            check(binary)
+
+
+@pytest.mark.skipif(platform.system() != "Linux", reason="ELF test")
 def test_relocated_worker_finds_its_bundled_library(tmp_path, monkeypatch):
     for tool in ("gcc", "patchelf", "readelf", "ldd"):
         if not shutil.which(tool):

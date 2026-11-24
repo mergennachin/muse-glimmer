@@ -10,14 +10,14 @@ publish the same bytes to PyPI and GitHub Releases.
 | --- | --- |
 | [workflows/wheel.yml](workflows/wheel.yml) | Coordinate platforms, require all tests, collect artifacts, request approval, publish and verify both registries. |
 | [workflows/mac_wheel.yml](workflows/mac_wheel.yml) | Build the Mac wheel, check installation on Python 3.11/3.13, run the full suite and a live Metal smoke test. |
-| [workflows/linux_wheel.yml](workflows/linux_wheel.yml) | Build CUDA 13.2 wheels and run installation, full-suite and live GPU tests; shared releases remain disabled pending validation. |
+| [workflows/linux_wheel.yml](workflows/linux_wheel.yml) | Build and audit CUDA 13.2 wheels and run installation, full-suite and live GPU tests. |
 | [workflows/wheel-linux-cuda.yml](workflows/wheel-linux-cuda.yml) | Manually validate Linux against a local CUDA model before enabling shared releases. |
 | [release-platforms.json](release-platforms.json) | Required platforms, runner labels, wheel tags, build workflow identities, and download-table descriptions. |
 | [../packaging/release.py](../packaging/release.py) | Artifact metadata, complete-set validation, provenance checks, upload retries and release notes. |
 
 The CUDA implementation and acceptance checklist are in [CUDA_RELEASE.md](CUDA_RELEASE.md).
-Only `darwin-arm64` is enabled today. Adding a platform makes it mandatory for
-that release; there is no automatic fallback to a partial platform set.
+Both `darwin-arm64` and `linux-x86_64-cuda-13_2` are required. There is no
+automatic fallback to a partial platform set.
 
 `wheel.yml` retains its name because PyPI Trusted Publishing is configured for
 that filename and the `pypi` environment. Platform workflows are reusable
@@ -91,15 +91,16 @@ python packaging/release_runner.py RUN_ID
 ```
 
 This runs enabled platform builds, full tests, live smoke tests, attestations,
-and collection. A branch run cannot publish. Once CUDA is enabled, join that
+and collection. A branch run cannot publish. Join that
 **same RUN_ID** on the Linux machine, using its capability label:
 
 ```sh
 python packaging/release_runner.py RUN_ID --label cuda-13_2
 ```
 
-The example CUDA label/platform name is provisional until the CUDA owner
-confirms the toolkit and architecture. See the handoff before enabling it.
+The CUDA runner requires the 13.2 toolkit, a GCC 12+ runtime, and a GPU
+compatible with the published model. Set proxy variables, including localhost
+exclusions in `no_proxy`, before starting the helper when the network requires them.
 
 Validate Linux independently with a local export on the runner host:
 
@@ -116,13 +117,11 @@ of `wheel.yml`, pass `-f cuda-model-path=/absolute/path/to/cuda-export`.
 
 This builds and attests the wheel, tests installation on Python 3.11/3.13, and
 runs live generation on Python 3.13. It uploads
-`muse-glimmer-linux-x86_64-cuda-13_2` without publishing. The build uses
-`linux_x86_64`, targets glibc 2.34+/x86-64-v2, and bundles the GNU C++ runtime.
-Older-glibc compatibility is outside the initial release scope. Before PyPI
-publication, validate an accepted wheel tag for the chosen modern baseline.
-Shared releases still require the acceptance checks in `CUDA_RELEASE.md`.
-They record manifests and checksums
-through the coordinator's existing artifact contract.
+`muse-glimmer-linux-x86_64-cuda-13_2` without publishing. The build produces a raw wheel, audits its ABI with auditwheel, and publishes
+`manylinux_2_34_x86_64`. The CPU minimum remains x86-64-v2; the wheel checker
+rejects higher ISA requirements while auditwheel checks the glibc ABI.
+The GNU C++ runtime is bundled. Shared releases record manifests and checksums
+through the coordinator's artifact contract.
 
 ## Publish
 
@@ -141,7 +140,7 @@ gh run list --workflow wheel.yml --branch "v${release_version}"
 python packaging/release_runner.py RUN_ID
 ```
 
-Start the Linux runner against that same run when enabled. Jobs can begin as
+Start the Linux runner against that same run. Jobs can begin as
 machines become available, but publication waits for all of them. A permanently
 missing runner leaves the release queued rather than silently dropping a platform.
 

@@ -23,7 +23,11 @@ def check_wheel(wheel: Path) -> None:
     minimum = project["tool"]["muse-glimmer"]["macos-deployment-target"]
     version = project["project"]["version"]
     target = tuple(map(int, minimum.split(".")))
-    cuda_tags = {"py3-none-linux_x86_64", "py3-none-manylinux_2_28_x86_64"}
+    cuda_tags = {
+        "py3-none-linux_x86_64",
+        "py3-none-manylinux_2_28_x86_64",
+        "py3-none-manylinux_2_34_x86_64",
+    }
     candidate_tag = wheel.name.removeprefix(f"muse_glimmer-{version}-").removesuffix(".whl")
     cuda = candidate_tag in cuda_tags
     tag = candidate_tag if cuda else f"py3-none-macosx_{target[0]}_0_arm64"
