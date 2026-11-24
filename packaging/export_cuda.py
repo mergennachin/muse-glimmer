@@ -64,7 +64,15 @@ def prepare_sdk(source: Path, env: dict[str, str]) -> None:
     )
 
 
-def export(checkpoint: Path, output: Path, forward_sizes: str = "1,4") -> None:
+def export(
+    checkpoint: Path,
+    output: Path,
+    forward_sizes: str = "1,4",
+    *,
+    kv_layout: str = "sequence",
+    max_kv_seqs: int = 16,
+    max_cells: int = 131072,
+) -> None:
     import torch
 
     if platform.system() != "Linux" or not torch.cuda.is_available():
@@ -112,9 +120,11 @@ def export(checkpoint: Path, output: Path, forward_sizes: str = "1,4") -> None:
         "--max-step-tokens",
         "512",
         "--max-cells",
-        "131072",
+        str(max_cells),
+        "--kv-layout",
+        kv_layout,
         "--max-kv-seqs",
-        "4",
+        str(max_kv_seqs),
         "--forward-sizes",
         forward_sizes,
         "--output-dir",
@@ -146,8 +156,9 @@ def export(checkpoint: Path, output: Path, forward_sizes: str = "1,4") -> None:
         "vision": False,
         "max_context_len": 131072,
         "max_step_tokens": 512,
-        "max_cells": 131072,
-        "max_kv_seqs": 4,
+        "kv_layout": kv_layout,
+        "max_cells": max_cells if kv_layout == "cell" else None,
+        "max_kv_seqs": max_kv_seqs if kv_layout == "sequence" else None,
         "forward_sizes": sorted({int(n) for n in forward_sizes.split(",")}),
         "python_version": platform.python_version(),
         "torch_version": torch.__version__,
@@ -168,5 +179,14 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, default=ROOT / "dist/models" / VARIANT)
     parser.add_argument("--forward-sizes", default="1,4", help="Static batch sizes; default matches CI's smaller configuration")
+    parser.add_argument("--kv-layout", choices=("sequence", "cell"), default="sequence",
+                        help="Sequence layout uses private histories and sliding-window ring buffers")
+    parser.add_argument("--max-kv-seqs", type=int, default=16,
+                        help="Sequence slots: default fits four sessions, eight prefixes and four captures")
+    parser.add_argument("--max-cells", type=int, default=131072,
+                        help="Total shared token cells when --kv-layout=cell")
     args = parser.parse_args()
-    export(args.checkpoint, args.output_dir, args.forward_sizes)
+    if args.max_kv_seqs < 1 or args.max_cells < 2:
+        parser.error("--max-kv-seqs must be positive and --max-cells must leave a padding cell")
+    export(args.checkpoint, args.output_dir, args.forward_sizes,
+           kv_layout=args.kv_layout, max_kv_seqs=args.max_kv_seqs, max_cells=args.max_cells)
